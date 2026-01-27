@@ -1,0 +1,31 @@
+{
+  "comment": "TLV Type Definitions - Ground truth for both C++ and Python. Types are organized by category with hex-aligned ranges.",
+  "types": {
+    "SYS_HEARTBEAT": 1,
+    "SYS_STATUS": 2,
+    "SYS_SET_PID": 3,
+    "SYS_GET_PID": 4,
+    "SYS_RES_PID": 5,
+    "DC_ENABLE": 256,
+    "DC_SET_POSITION": 257,
+    "DC_SET_VELOCITY": 258,
+    "DC_STATUS": 259,
+    "STEP_ENABLE": 512,
+    "STEP_SET_ACCEL": 513,
+    "STEP_SET_VEL": 514,
+    "STEP_MOVE": 515,
+    "STEP_HOME": 516,
+    "STEP_STATUS": 517,
+    "SERVO_ENABLE": 768,
+    "SERVO_SET": 769,
+    "SENSOR_VOLTAGE": 1024,
+    "SENSOR_ENCODER": 1025,
+    "SENSOR_CURRENT": 1026,
+    "SENSOR_IMU": 1027,
+    "SENSOR_RANGE": 1028,
+    "IO_SET_LED": 1280,
+    "IO_SET_NEOPIXEL": 1281,
+    "IO_BUTTON_STATE": 1282,
+    "IO_LIMIT_STATE": 1283
+  }
+}
