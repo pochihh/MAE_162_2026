@@ -46,10 +46,10 @@
 #include "src/modules/VelocityEstimator.h"
 #include "src/drivers/DCMotor.h"
 
-// Phase 4+ includes (commented out until implemented)
-// #include "src/modules/StepperManager.h"
-// #include "src/drivers/StepperMotor.h"
-// #include "src/drivers/ServoController.h"
+// Phase 4+ includes
+#include "src/modules/StepperManager.h"
+#include "src/drivers/StepperMotor.h"
+#include "src/drivers/ServoController.h"
 
 // Phase 5+ includes (commented out until implemented)
 // #include "src/modules/SensorManager.h"
@@ -145,8 +145,9 @@ void taskUARTComms() {
   // Process incoming/outgoing TLV messages
   MessageCenter::processingTick();
 
-  // Safety timeout check - disable motors if heartbeat lost
+  // Safety timeout check - disable all motors if heartbeat lost
   if (!MessageCenter::isHeartbeatValid()) {
+    // Disable DC motors
 #if DC_MOTOR_1_ENABLED
     dcMotors[0].disable();
 #endif
@@ -158,6 +159,14 @@ void taskUARTComms() {
 #endif
 #if DC_MOTOR_4_ENABLED
     dcMotors[3].disable();
+#endif
+
+    // Disable stepper motors
+    StepperManager::disableAll();
+
+    // Disable servo outputs
+#if SERVO_CONTROLLER_ENABLED
+    ServoController::disable();
 #endif
   }
 }
@@ -215,8 +224,8 @@ void setup() {
 
   DEBUG_SERIAL.println();
   DEBUG_SERIAL.println(F("========================================"));
-  DEBUG_SERIAL.println(F("  MAE 162 Robot Firmware v0.3.0"));
-  DEBUG_SERIAL.println(F("  Phase 3: DC Motor Control"));
+  DEBUG_SERIAL.println(F("  MAE 162 Robot Firmware v0.4.0"));
+  DEBUG_SERIAL.println(F("  Phase 4: Steppers & Servos"));
   DEBUG_SERIAL.println(F("========================================"));
   DEBUG_SERIAL.println();
 
@@ -258,16 +267,17 @@ void setup() {
   // ------------------------------------------------------------------------
   // Phase 4: Initialize ServoController (PCA9685)
   // ------------------------------------------------------------------------
-  // if (SERVO_CONTROLLER_ENABLED) {
-  //   DEBUG_SERIAL.println(F("[Setup] Initializing servo controller..."));
-  //   ServoController::init();
-  // }
+#if SERVO_CONTROLLER_ENABLED
+  DEBUG_SERIAL.println(F("[Setup] Initializing servo controller..."));
+  ServoController::init();
+  DEBUG_SERIAL.println(F("  - PCA9685 initialized (50Hz PWM)"));
+#endif
 
   // ------------------------------------------------------------------------
   // Phase 4: Initialize StepperManager (Timer3 @ 10kHz)
   // ------------------------------------------------------------------------
-  // DEBUG_SERIAL.println(F("[Setup] Initializing stepper motors..."));
-  // StepperManager::init();
+  DEBUG_SERIAL.println(F("[Setup] Initializing stepper motors..."));
+  StepperManager::init();
 
   // ------------------------------------------------------------------------
   // Phase 3: Initialize DC Motors and Encoders

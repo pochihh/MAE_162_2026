@@ -152,6 +152,24 @@
 #define PIN_NEOPIXEL            42      // NeoPixel data line
 
 // ============================================================================
+// SERVO CONTROLLER (PCA9685)
+// ============================================================================
+
+// I2C pins are shared (PIN_I2C_SDA, PIN_I2C_SCL)
+// PCA9685 Output Enable pin (active LOW) - optional for power control
+// #define PIN_SERVO_OE            xx    // Define if OE pin is connected
+
+// ============================================================================
+// STEPPER LIMIT SWITCHES (for homing)
+// ============================================================================
+
+// Stepper limit switch assignments (maps to limit switch pins)
+#define PIN_ST1_LIMIT           PIN_LIM1  // Stepper 1 limit (40)
+#define PIN_ST2_LIMIT           PIN_LIM2  // Stepper 2 limit (41)
+#define PIN_ST3_LIMIT           PIN_LIM3  // Stepper 3 limit (48)
+#define PIN_ST4_LIMIT           PIN_LIM4  // Stepper 4 limit (49)
+
+// ============================================================================
 // ANALOG VOLTAGE SENSING
 // ============================================================================
 

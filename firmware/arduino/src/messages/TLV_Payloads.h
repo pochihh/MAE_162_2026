@@ -276,9 +276,11 @@ struct PayloadStepStatus {
  */
 enum StepperState {
     STEPPER_IDLE    = 0,    // Not moving
-    STEPPER_MOVING  = 1,    // Moving to target
-    STEPPER_HOMING  = 2,    // Homing sequence
-    STEPPER_FAULT   = 3,    // Fault condition (e.g., stall detected)
+    STEPPER_ACCEL   = 1,    // Accelerating phase
+    STEPPER_CRUISE  = 2,    // Constant velocity phase
+    STEPPER_DECEL   = 3,    // Decelerating phase
+    STEPPER_HOMING  = 4,    // Homing sequence (moving until limit switch)
+    STEPPER_FAULT   = 5,    // Fault condition (e.g., stall detected)
 };
 
 // ============================================================================

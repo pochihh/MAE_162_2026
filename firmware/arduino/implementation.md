@@ -817,17 +817,20 @@ arduino-cli upload -p /dev/cu.usbserial* --fqbn arduino:avr:mega tests/test_sche
 - `test_encoder`: 6292 bytes (2% flash), 515 bytes RAM (6%)
 - `test_dc_motor_pwm`: 7058 bytes (2% flash), 501 bytes RAM (6%)
 - `test_dc_motor_pid`: 13362 bytes (5% flash), 808 bytes RAM (9%)
-- `arduino` (main): 15436 bytes (6% flash), 3410 bytes RAM (41%)
+- `test_stepper`: 12560 bytes (4% flash), 887 bytes RAM (10%)
+- `test_servo`: 14076 bytes (5% flash), 1014 bytes RAM (12%)
+- `arduino` (Phase 3): 15436 bytes (6% flash), 3410 bytes RAM (41%)
+- `arduino` (Phase 4): 17016 bytes (6% flash), 3785 bytes RAM (46%)
 
-| Test Folder | Phase | Purpose |
-|-------------|-------|---------|
-| `test_scheduler/` | 1 | Timer interrupt timing accuracy |
-| `test_uart_tlv/` | 2 | TLV encode/decode at 921600 baud |
-| `test_encoder/` | 3 | Quadrature encoder counting |
-| `test_dc_motor_pwm/` | 3 | Direct PWM motor control |
-| `test_dc_motor_pid/` | 3 | PID position/velocity control |
-| `test_stepper/` | 4 | Stepper step/dir/enable |
-| `test_servo/` | 4 | PCA9685 servo sweep |
+| Test Folder | Phase | Purpose | Status |
+|-------------|-------|---------|--------|
+| `test_scheduler/` | 1 | Timer interrupt timing accuracy | ✅ Compiled |
+| `test_uart_tlv/` | 2 | TLV encode/decode at 921600 baud | ✅ Compiled |
+| `test_encoder/` | 3 | Quadrature encoder counting | ✅ Compiled |
+| `test_dc_motor_pwm/` | 3 | Direct PWM motor control | ✅ Compiled |
+| `test_dc_motor_pid/` | 3 | PID position/velocity control | ✅ Compiled |
+| `test_stepper/` | 4 | Stepper step/dir/enable, acceleration | ✅ Compiled |
+| `test_servo/` | 4 | PCA9685 servo control, 16 channels | ✅ Compiled |
 | `test_imu/` | 5 | ICM-20948 accel/gyro reading |
 | `test_ultrasonic/` | 5 | I2C ultrasonic distance |
 | `test_voltage/` | 5 | Battery/rail voltage ADC |
@@ -869,11 +872,13 @@ See individual test files for implementation details.
 | **3** | `test_dc_motor_pwm.ino` | ✅ | 2026-01-27 | 7058 bytes, direct PWM control test |
 | **3** | `test_dc_motor_pid.ino` | ✅ | 2026-01-27 | 13362 bytes, closed-loop PID test |
 | **3** | `arduino.ino` integration | ✅ | 2026-01-27 | Phase 3 motors integrated, 15436 bytes |
-| **4** | `StepperMotor.h/cpp` | ⬜ | | Acceleration support |
-| **4** | `StepperManager.h/cpp` | ⬜ | | Timer3 management |
-| **4** | `ServoController.h/cpp` | ⬜ | | PCA9685 wrapper |
-| **4** | `test_stepper.ino` | ⬜ | | |
-| **4** | `test_servo.ino` | ⬜ | | |
+| **4** | `StepperMotor.h/cpp` | ✅ | 2026-01-27 | Trapezoidal motion profiles, limit switches |
+| **4** | `StepperManager.h/cpp` | ✅ | 2026-01-27 | Timer3 @ 10kHz, multi-stepper coordination |
+| **4** | `ServoController.h/cpp` | ✅ | 2026-01-27 | PCA9685 I2C wrapper, 16 channels |
+| **4** | `PCA9685_compile.cpp` | ✅ | 2026-01-27 | Arduino IDE compilation wrapper |
+| **4** | `arduino.ino` integration | ✅ | 2026-01-27 | Phase 4 integrated, 17016 bytes (46% RAM) |
+| **4** | `test_stepper.ino` | ✅ | 2026-01-28 | 12560 bytes, interactive command interface |
+| **4** | `test_servo.ino` | ✅ | 2026-01-28 | 14076 bytes, 16-channel control + sweep |
 | **5** | `IMUDriver.h/cpp` | ⬜ | | ICM-20948 wrapper |
 | **5** | `UltrasonicDriver.h/cpp` | ⬜ | | I2C ultrasonic |
 | **5** | `NeoPixelDriver.h/cpp` | ⬜ | | LED library wrapper |
@@ -891,6 +896,7 @@ See individual test files for implementation details.
 - ⬜ Not Started
 - 🔄 In Progress
 - ✅ Complete
+- ⏸️ Paused/Deferred
 - ⚠️ Blocked
 - ❌ Cancelled
 
