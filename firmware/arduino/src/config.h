@@ -69,14 +69,14 @@
 #define STEPPER_MAX_RATE_SPS    5000    // Maximum steps per second per motor
 
 // Safety timeout
-#define HEARTBEAT_TIMEOUT_MS    50      // Disable motors if no heartbeat
+#define HEARTBEAT_TIMEOUT_MS    500      // Disable motors if no heartbeat
 
 // ============================================================================
 // COMMUNICATION SETTINGS
 // ============================================================================
 
 // UART to Raspberry Pi (Serial2)
-#define RPI_BAUD_RATE           921600  // High-speed UART
+#define RPI_BAUD_RATE           500000  // High-speed UART
 #define RPI_SERIAL              Serial2 // Hardware serial port
 
 // Debug serial (Serial0 - USB)
@@ -85,6 +85,15 @@
 
 // Device identification
 #define DEVICE_ID               0x01    // Arduino device ID for TLV protocol
+#define ENABLE_CRC_CHECK      1       // Enable CRC checks on TLV packets
+
+// ============================================================================
+// VELOCITY ESTIMATION CONFIGURATION
+// ============================================================================
+
+// Velocity estimator settings
+#define VELOCITY_FILTER_SIZE    4       // Moving average filter size (2-8 samples)
+#define VELOCITY_ZERO_TIMEOUT   50      // Zero velocity timeout (milliseconds)
 
 // ============================================================================
 // PID CONTROLLER DEFAULTS

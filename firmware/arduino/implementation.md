@@ -813,7 +813,11 @@ arduino-cli upload -p /dev/cu.usbserial* --fqbn arduino:avr:mega tests/test_sche
 
 **Verified Compilation Results:**
 - `test_scheduler`: 5590 bytes (2% flash), 445 bytes RAM (5%)
-- `test_uart_tlv`: 8222 bytes (3% flash), 2726 bytes RAM (33%)
+- `test_uart_tlv`: 10706 bytes (4% flash), 2754 bytes RAM (33%)
+- `test_encoder`: 6292 bytes (2% flash), 515 bytes RAM (6%)
+- `test_dc_motor_pwm`: 7058 bytes (2% flash), 501 bytes RAM (6%)
+- `test_dc_motor_pid`: 13362 bytes (5% flash), 808 bytes RAM (9%)
+- `arduino` (main): 15436 bytes (6% flash), 3410 bytes RAM (41%)
 
 | Test Folder | Phase | Purpose |
 |-------------|-------|---------|
@@ -857,13 +861,14 @@ See individual test files for implementation details.
 | **2** | `TLV_TypeDefs.h` | ✅ | 2026-01-27 | Moved to messages/, C-compatible |
 | **2** | `MessageCenter.h/cpp` | ✅ | 2026-01-27 | Complete refactor with TLV protocol |
 | **2** | `tlvcodec integration` | ✅ | 2026-01-27 | Wrapper for Arduino IDE compilation |
-| **2** | `test_uart_tlv/` | ⚠️ | 2026-01-27 | Needs testing with RPi (standalone test limited) |
-| **3** | `EncoderCounter.h/cpp` | ⬜ | | 2x/4x modes |
-| **3** | `VelocityEstimator.h/cpp` | ⬜ | | Edge-time method |
-| **3** | `DCMotor.h/cpp` | ⬜ | | Cascade PID |
-| **3** | `test_encoder.ino` | ⬜ | | |
-| **3** | `test_dc_motor_pwm.ino` | ⬜ | | |
-| **3** | `test_dc_motor_pid.ino` | ⬜ | | |
+| **2** | `test_uart_tlv/` | ✅ | 2026-01-27 | Communication quality stats added, CRC enabled |
+| **3** | `EncoderCounter.h/cpp` | ✅ | 2026-01-27 | 2x/4x modes, interface + implementations |
+| **3** | `VelocityEstimator.h/cpp` | ✅ | 2026-01-27 | Edge-time + pulse-count methods |
+| **3** | `DCMotor.h/cpp` | ✅ | 2026-01-27 | Cascade PID, position/velocity modes |
+| **3** | `test_encoder.ino` | ✅ | 2026-01-27 | 6292 bytes, encoder counting verified |
+| **3** | `test_dc_motor_pwm.ino` | ✅ | 2026-01-27 | 7058 bytes, direct PWM control test |
+| **3** | `test_dc_motor_pid.ino` | ✅ | 2026-01-27 | 13362 bytes, closed-loop PID test |
+| **3** | `arduino.ino` integration | ✅ | 2026-01-27 | Phase 3 motors integrated, 15436 bytes |
 | **4** | `StepperMotor.h/cpp` | ⬜ | | Acceleration support |
 | **4** | `StepperManager.h/cpp` | ⬜ | | Timer3 management |
 | **4** | `ServoController.h/cpp` | ⬜ | | PCA9685 wrapper |

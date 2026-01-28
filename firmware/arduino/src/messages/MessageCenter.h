@@ -87,6 +87,43 @@ public:
     static uint32_t timeSinceHeartbeat();
 
     // ========================================================================
+    // COMMUNICATION STATISTICS
+    // ========================================================================
+
+    /**
+     * @brief Get total number of frames successfully received
+     *
+     * @return Total frames with no decode errors
+     */
+    static uint32_t getFramesReceived();
+
+    /**
+     * @brief Get total number of decode errors
+     *
+     * @return Total frames with any decode error
+     */
+    static uint32_t getDecodeErrors();
+
+    /**
+     * @brief Get total number of CRC errors
+     *
+     * @return Total frames with CRC mismatch
+     */
+    static uint32_t getCRCErrors();
+
+    /**
+     * @brief Get total number of messages sent
+     *
+     * @return Total TLV frames transmitted
+     */
+    static uint32_t getMessagesSent();
+
+    /**
+     * @brief Reset all communication statistics
+     */
+    static void resetStatistics();
+
+    // ========================================================================
     // OUTGOING MESSAGE QUEUE (Arduino → RPi)
     // ========================================================================
 
@@ -190,6 +227,15 @@ private:
 
     static uint32_t lastHeartbeatTime;      // millis() when last heartbeat received
     static bool     heartbeatReceived;      // Has any heartbeat been received?
+
+    // ========================================================================
+    // COMMUNICATION STATISTICS
+    // ========================================================================
+
+    static uint32_t framesReceived;         // Total frames successfully decoded
+    static uint32_t decodeErrors;           // Total decode errors (any type)
+    static uint32_t crcErrors;              // Total CRC errors specifically
+    static uint32_t messagesSent;           // Total frames transmitted
 
     // ========================================================================
     // TLV DECODE CALLBACK (called by tlvcodec library)

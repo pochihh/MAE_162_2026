@@ -41,10 +41,10 @@
 #include "src/messages/MessageCenter.h"
 #include "src/messages/TLV_Payloads.h"
 
-// Phase 3+ includes (commented out until implemented)
-// #include "src/modules/EncoderCounter.h"
-// #include "src/modules/VelocityEstimator.h"
-// #include "src/drivers/DCMotor.h"
+// Phase 3+ includes
+#include "src/modules/EncoderCounter.h"
+#include "src/modules/VelocityEstimator.h"
+#include "src/drivers/DCMotor.h"
 
 // Phase 4+ includes (commented out until implemented)
 // #include "src/modules/StepperManager.h"
@@ -61,8 +61,41 @@
 // GLOBAL OBJECTS
 // ============================================================================
 
-// Phase 1: Scheduler only
-// Future phases will add motor, sensor, and communication objects here
+// Phase 3: DC Motors, Encoders, and Velocity Estimators
+
+// Encoder instances (2x mode for current hardware)
+#if ENCODER_1_MODE == ENCODER_2X
+EncoderCounter2x encoder1;
+#else
+EncoderCounter4x encoder1;
+#endif
+
+#if ENCODER_2_MODE == ENCODER_2X
+EncoderCounter2x encoder2;
+#else
+EncoderCounter4x encoder2;
+#endif
+
+#if ENCODER_3_MODE == ENCODER_2X
+EncoderCounter2x encoder3;
+#else
+EncoderCounter4x encoder3;
+#endif
+
+#if ENCODER_4_MODE == ENCODER_2X
+EncoderCounter2x encoder4;
+#else
+EncoderCounter4x encoder4;
+#endif
+
+// Velocity estimators (edge-time algorithm)
+EdgeTimeVelocityEstimator velocityEst1;
+EdgeTimeVelocityEstimator velocityEst2;
+EdgeTimeVelocityEstimator velocityEst3;
+EdgeTimeVelocityEstimator velocityEst4;
+
+// DC motor controllers
+DCMotor dcMotors[NUM_DC_MOTORS];
 
 // ============================================================================
 // TASK CALLBACKS
@@ -75,19 +108,26 @@
  * Runs every 5ms (200Hz) with highest priority for smooth control.
  */
 void taskDCMotorPID() {
-  // Phase 3: DC motor PID update will be implemented here
-  // For now, this is a placeholder
-
 #ifdef DEBUG_PINS_ENABLED
   digitalWrite(DEBUG_PIN_PID_LOOP, HIGH);
 #endif
 
-  // Future implementation:
-  // for (uint8_t i = 0; i < NUM_DC_MOTORS; i++) {
-  //   if (DC_MOTOR_X_ENABLED) {
-  //     dcMotors[i].update();
-  //   }
-  // }
+  // Update all enabled DC motor PID controllers
+#if DC_MOTOR_1_ENABLED
+  dcMotors[0].update();
+#endif
+
+#if DC_MOTOR_2_ENABLED
+  dcMotors[1].update();
+#endif
+
+#if DC_MOTOR_3_ENABLED
+  dcMotors[2].update();
+#endif
+
+#if DC_MOTOR_4_ENABLED
+  dcMotors[3].update();
+#endif
 
 #ifdef DEBUG_PINS_ENABLED
   digitalWrite(DEBUG_PIN_PID_LOOP, LOW);
@@ -105,12 +145,20 @@ void taskUARTComms() {
   // Process incoming/outgoing TLV messages
   MessageCenter::processingTick();
 
-  // Safety timeout check
+  // Safety timeout check - disable motors if heartbeat lost
   if (!MessageCenter::isHeartbeatValid()) {
-    // TODO Phase 3: Disable all motors when heartbeat timeout occurs
-    // for (uint8_t i = 0; i < NUM_DC_MOTORS; i++) {
-    //   dcMotors[i].disable();
-    // }
+#if DC_MOTOR_1_ENABLED
+    dcMotors[0].disable();
+#endif
+#if DC_MOTOR_2_ENABLED
+    dcMotors[1].disable();
+#endif
+#if DC_MOTOR_3_ENABLED
+    dcMotors[2].disable();
+#endif
+#if DC_MOTOR_4_ENABLED
+    dcMotors[3].disable();
+#endif
   }
 }
 
@@ -167,8 +215,8 @@ void setup() {
 
   DEBUG_SERIAL.println();
   DEBUG_SERIAL.println(F("========================================"));
-  DEBUG_SERIAL.println(F("  MAE 162 Robot Firmware v0.1.0"));
-  DEBUG_SERIAL.println(F("  Phase 1: Scheduler Foundation"));
+  DEBUG_SERIAL.println(F("  MAE 162 Robot Firmware v0.3.0"));
+  DEBUG_SERIAL.println(F("  Phase 3: DC Motor Control"));
   DEBUG_SERIAL.println(F("========================================"));
   DEBUG_SERIAL.println();
 
@@ -224,21 +272,94 @@ void setup() {
   // ------------------------------------------------------------------------
   // Phase 3: Initialize DC Motors and Encoders
   // ------------------------------------------------------------------------
-  // DEBUG_SERIAL.println(F("[Setup] Initializing DC motors..."));
-  // for (uint8_t i = 0; i < NUM_DC_MOTORS; i++) {
-  //   if (DC_MOTOR_X_ENABLED) {
-  //     dcMotors[i].init();
-  //   }
-  // }
+  DEBUG_SERIAL.println(F("[Setup] Initializing DC motors and encoders..."));
+
+  // Calculate counts per revolution based on encoder mode
+  uint16_t countsPerRev = ENCODER_PPR * encoder1.getResolutionMultiplier();
+  DEBUG_SERIAL.print(F("  - Encoder resolution: "));
+  DEBUG_SERIAL.print(countsPerRev);
+  DEBUG_SERIAL.println(F(" counts/rev"));
+
+  // Motor 1
+#if DC_MOTOR_1_ENABLED
+  encoder1.init(PIN_M1_ENC_A, PIN_M1_ENC_B);
+  velocityEst1.init(countsPerRev);
+  velocityEst1.setFilterSize(VELOCITY_FILTER_SIZE);
+  velocityEst1.setZeroTimeout(VELOCITY_ZERO_TIMEOUT);
+
+  dcMotors[0].init(0, &encoder1, &velocityEst1);
+  dcMotors[0].setPins(PIN_M1_EN, PIN_M1_IN1, PIN_M1_IN2);
+  dcMotors[0].setPositionPID(DEFAULT_POS_KP, DEFAULT_POS_KI, DEFAULT_POS_KD);
+  dcMotors[0].setVelocityPID(DEFAULT_VEL_KP, DEFAULT_VEL_KI, DEFAULT_VEL_KD);
+  DEBUG_SERIAL.println(F("  - Motor 1 initialized"));
+#endif
+
+  // Motor 2
+#if DC_MOTOR_2_ENABLED
+  encoder2.init(PIN_M2_ENC_A, PIN_M2_ENC_B);
+  velocityEst2.init(countsPerRev);
+  velocityEst2.setFilterSize(VELOCITY_FILTER_SIZE);
+  velocityEst2.setZeroTimeout(VELOCITY_ZERO_TIMEOUT);
+
+  dcMotors[1].init(1, &encoder2, &velocityEst2);
+  dcMotors[1].setPins(PIN_M2_EN, PIN_M2_IN1, PIN_M2_IN2);
+  dcMotors[1].setPositionPID(DEFAULT_POS_KP, DEFAULT_POS_KI, DEFAULT_POS_KD);
+  dcMotors[1].setVelocityPID(DEFAULT_VEL_KP, DEFAULT_VEL_KI, DEFAULT_VEL_KD);
+  DEBUG_SERIAL.println(F("  - Motor 2 initialized"));
+#endif
+
+  // Motor 3
+#if DC_MOTOR_3_ENABLED
+  encoder3.init(PIN_M3_ENC_A, PIN_M3_ENC_B);
+  velocityEst3.init(countsPerRev);
+  velocityEst3.setFilterSize(VELOCITY_FILTER_SIZE);
+  velocityEst3.setZeroTimeout(VELOCITY_ZERO_TIMEOUT);
+
+  dcMotors[2].init(2, &encoder3, &velocityEst3);
+  dcMotors[2].setPins(PIN_M3_EN, PIN_M3_IN1, PIN_M3_IN2);
+  dcMotors[2].setPositionPID(DEFAULT_POS_KP, DEFAULT_POS_KI, DEFAULT_POS_KD);
+  dcMotors[2].setVelocityPID(DEFAULT_VEL_KP, DEFAULT_VEL_KI, DEFAULT_VEL_KD);
+  DEBUG_SERIAL.println(F("  - Motor 3 initialized"));
+#endif
+
+  // Motor 4
+#if DC_MOTOR_4_ENABLED
+  encoder4.init(PIN_M4_ENC_A, PIN_M4_ENC_B);
+  velocityEst4.init(countsPerRev);
+  velocityEst4.setFilterSize(VELOCITY_FILTER_SIZE);
+  velocityEst4.setZeroTimeout(VELOCITY_ZERO_TIMEOUT);
+
+  dcMotors[3].init(3, &encoder4, &velocityEst4);
+  dcMotors[3].setPins(PIN_M4_EN, PIN_M4_IN1, PIN_M4_IN2);
+  dcMotors[3].setPositionPID(DEFAULT_POS_KP, DEFAULT_POS_KI, DEFAULT_POS_KD);
+  dcMotors[3].setVelocityPID(DEFAULT_VEL_KP, DEFAULT_VEL_KI, DEFAULT_VEL_KD);
+  DEBUG_SERIAL.println(F("  - Motor 4 initialized"));
+#endif
 
   // ------------------------------------------------------------------------
   // Phase 3: Attach Encoder ISRs
   // ------------------------------------------------------------------------
-  // DEBUG_SERIAL.println(F("[Setup] Attaching encoder interrupts..."));
-  // attachInterrupt(digitalPinToInterrupt(PIN_M1_ENC_A), encoderISR_M1, CHANGE);
-  // attachInterrupt(digitalPinToInterrupt(PIN_M2_ENC_A), encoderISR_M2, CHANGE);
-  // attachInterrupt(digitalPinToInterrupt(PIN_M3_ENC_A), encoderISR_M3, CHANGE);
-  // attachInterrupt(digitalPinToInterrupt(PIN_M4_ENC_A), encoderISR_M4, CHANGE);
+  DEBUG_SERIAL.println(F("[Setup] Attaching encoder interrupts..."));
+
+#if DC_MOTOR_1_ENABLED
+  attachInterrupt(digitalPinToInterrupt(PIN_M1_ENC_A), encoderISR_M1, CHANGE);
+  DEBUG_SERIAL.println(F("  - Motor 1 encoder ISR attached"));
+#endif
+
+#if DC_MOTOR_2_ENABLED
+  attachInterrupt(digitalPinToInterrupt(PIN_M2_ENC_A), encoderISR_M2, CHANGE);
+  DEBUG_SERIAL.println(F("  - Motor 2 encoder ISR attached"));
+#endif
+
+#if DC_MOTOR_3_ENABLED
+  attachInterrupt(digitalPinToInterrupt(PIN_M3_ENC_A), encoderISR_M3, CHANGE);
+  DEBUG_SERIAL.println(F("  - Motor 3 encoder ISR attached"));
+#endif
+
+#if DC_MOTOR_4_ENABLED
+  attachInterrupt(digitalPinToInterrupt(PIN_M4_ENC_A), encoderISR_M4, CHANGE);
+  DEBUG_SERIAL.println(F("  - Motor 4 encoder ISR attached"));
+#endif
 
   // ------------------------------------------------------------------------
   // 3. Register Scheduler Tasks
@@ -321,28 +442,26 @@ void loop() {
 // Encoder ISRs must be global functions (not class methods) to use with
 // attachInterrupt().
 
-// Uncomment when Phase 3 encoders are implemented:
+void encoderISR_M1() {
+#ifdef DEBUG_PINS_ENABLED
+  digitalWrite(DEBUG_PIN_ENCODER_ISR, HIGH);
+#endif
 
-// void encoderISR_M1() {
-//   #ifdef DEBUG_PINS_ENABLED
-//     digitalWrite(DEBUG_PIN_ENCODER_ISR, HIGH);
-//   #endif
-//
-//   dcMotors[0].onEncoderInterrupt();
-//
-//   #ifdef DEBUG_PINS_ENABLED
-//     digitalWrite(DEBUG_PIN_ENCODER_ISR, LOW);
-//   #endif
-// }
-//
-// void encoderISR_M2() {
-//   dcMotors[1].onEncoderInterrupt();
-// }
-//
-// void encoderISR_M3() {
-//   dcMotors[2].onEncoderInterrupt();
-// }
-//
-// void encoderISR_M4() {
-//   dcMotors[3].onEncoderInterrupt();
-// }
+  encoder1.onInterruptA();
+
+#ifdef DEBUG_PINS_ENABLED
+  digitalWrite(DEBUG_PIN_ENCODER_ISR, LOW);
+#endif
+}
+
+void encoderISR_M2() {
+  encoder2.onInterruptA();
+}
+
+void encoderISR_M3() {
+  encoder3.onInterruptA();
+}
+
+void encoderISR_M4() {
+  encoder4.onInterruptA();
+}

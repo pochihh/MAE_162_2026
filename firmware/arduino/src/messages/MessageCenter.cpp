@@ -23,6 +23,12 @@ uint8_t MessageCenter::pendingMessageCount = 0;
 uint32_t MessageCenter::lastHeartbeatTime = 0;
 bool MessageCenter::heartbeatReceived = false;
 
+// Communication statistics
+uint32_t MessageCenter::framesReceived = 0;
+uint32_t MessageCenter::decodeErrors = 0;
+uint32_t MessageCenter::crcErrors = 0;
+uint32_t MessageCenter::messagesSent = 0;
+
 // ============================================================================
 // INITIALIZATION
 // ============================================================================
@@ -35,7 +41,7 @@ void MessageCenter::init() {
     initDecodeDescriptor(
         &decoder,
         MSG_TLV_BUFFER_SIZE,
-        false,  // CRC disabled for now (can enable later for reliability)
+        ENABLE_CRC_CHECK,  // CRC enabled or disabled
         MessageCenter::decodeCallback
     );
 
@@ -44,7 +50,7 @@ void MessageCenter::init() {
         &encoder,
         MSG_TLV_BUFFER_SIZE,
         DEVICE_ID,
-        false   // CRC disabled for now
+        ENABLE_CRC_CHECK   // CRC enabled or disabled
     );
 
     serialBufferIndex = 0;
@@ -121,6 +127,33 @@ uint32_t MessageCenter::timeSinceHeartbeat() {
 }
 
 // ============================================================================
+// COMMUNICATION STATISTICS
+// ============================================================================
+
+uint32_t MessageCenter::getFramesReceived() {
+    return framesReceived;
+}
+
+uint32_t MessageCenter::getDecodeErrors() {
+    return decodeErrors;
+}
+
+uint32_t MessageCenter::getCRCErrors() {
+    return crcErrors;
+}
+
+uint32_t MessageCenter::getMessagesSent() {
+    return messagesSent;
+}
+
+void MessageCenter::resetStatistics() {
+    framesReceived = 0;
+    decodeErrors = 0;
+    crcErrors = 0;
+    messagesSent = 0;
+}
+
+// ============================================================================
 // TLV DECODE CALLBACK (dispatches incoming messages)
 // ============================================================================
 
@@ -130,13 +163,24 @@ void MessageCenter::decodeCallback(
     TlvHeader *tlvHeaders,
     uint8_t **tlvData
 ) {
+    // Track decode statistics
     if (*error != NoError) {
+        decodeErrors++;
+
+        // Track CRC errors specifically
+        if (*error == CrcError) {
+            crcErrors++;
+        }
+
 #ifdef DEBUG_TLV_PACKETS
         DEBUG_SERIAL.print(F("[MessageCenter] Decode error: "));
         DEBUG_SERIAL.println(*error);
 #endif
         return;
     }
+
+    // Successfully decoded frame
+    framesReceived++;
 
 #ifdef DEBUG_TLV_PACKETS
     DEBUG_SERIAL.print(F("[MessageCenter] Frame received: "));
@@ -510,6 +554,9 @@ void MessageCenter::flushMessages() {
 
     // Send via Serial2
     RPI_SERIAL.write(encoder.buffer, bufferSize);
+
+    // Track messages sent
+    messagesSent++;
 
 #ifdef DEBUG_TLV_PACKETS
     DEBUG_SERIAL.print(F("[MessageCenter] Sent frame: "));

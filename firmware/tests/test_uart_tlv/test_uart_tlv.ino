@@ -75,6 +75,51 @@ void taskSendStatus() {
   }
 }
 
+/**
+ * @brief Communication Quality Statistics (0.1Hz / 10 seconds)
+ * Prints decode errors and communication statistics
+ */
+void taskPrintStats() {
+  DEBUG_SERIAL.println();
+  DEBUG_SERIAL.println(F("========================================"));
+  DEBUG_SERIAL.println(F("  COMMUNICATION QUALITY STATISTICS"));
+  DEBUG_SERIAL.println(F("========================================"));
+
+  uint32_t framesRx = MessageCenter::getFramesReceived();
+  uint32_t framesTx = MessageCenter::getMessagesSent();
+  uint32_t decodeErr = MessageCenter::getDecodeErrors();
+  uint32_t crcErr = MessageCenter::getCRCErrors();
+
+  DEBUG_SERIAL.print(F("Frames Received:  "));
+  DEBUG_SERIAL.println(framesRx);
+
+  DEBUG_SERIAL.print(F("Frames Sent:      "));
+  DEBUG_SERIAL.println(framesTx);
+
+  DEBUG_SERIAL.print(F("Decode Errors:    "));
+  DEBUG_SERIAL.print(decodeErr);
+  if (framesRx + decodeErr > 0) {
+    float errorRate = 100.0 * decodeErr / (framesRx + decodeErr);
+    DEBUG_SERIAL.print(F(" ("));
+    DEBUG_SERIAL.print(errorRate, 2);
+    DEBUG_SERIAL.print(F("%)"));
+  }
+  DEBUG_SERIAL.println();
+
+  DEBUG_SERIAL.print(F("CRC Errors:       "));
+  DEBUG_SERIAL.print(crcErr);
+  if (decodeErr > 0) {
+    float crcRate = 100.0 * crcErr / decodeErr;
+    DEBUG_SERIAL.print(F(" ("));
+    DEBUG_SERIAL.print(crcRate, 1);
+    DEBUG_SERIAL.print(F("% of errors)"));
+  }
+  DEBUG_SERIAL.println();
+
+  DEBUG_SERIAL.println(F("========================================"));
+  DEBUG_SERIAL.println();
+}
+
 // ============================================================================
 // SETUP
 // ============================================================================
@@ -104,8 +149,9 @@ void setup() {
   DEBUG_SERIAL.println(DEVICE_ID, HEX);
 
   // Register Tasks
-  Scheduler::registerTask(taskUART, 10, 1);         // 10ms period (100Hz)
-  Scheduler::registerTask(taskSendStatus, 1000, 2); // 1000ms period (1Hz)
+  Scheduler::registerTask(taskUART, 10, 1);          // 10ms period (100Hz)
+  Scheduler::registerTask(taskSendStatus, 1000, 2);  // 1000ms period (1Hz)
+  Scheduler::registerTask(taskPrintStats, 10000, 3); // 10000ms period (0.1Hz)
 
   DEBUG_SERIAL.println(F("[Setup] Tasks registered"));
   DEBUG_SERIAL.println(F("[Setup] Starting Main Loop..."));
