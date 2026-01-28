@@ -44,9 +44,10 @@ from TLV_TypeDefs import *
 # ============================================================================
 
 DEFAULT_PORT = '/dev/ttyAMA0'  # Raspberry Pi serial port (GPIO 14/15)
-DEFAULT_BAUD = 921600
+DEFAULT_BAUD = 115200  # Baud rate
 DEVICE_ID = 0x01  # RPi device ID
-HEARTBEAT_INTERVAL = 0.5  # Send heartbeat every 500ms
+HEARTBEAT_INTERVAL = 0.01  # Send heartbeat every 10 ms
+ENABLE_CRC_CHECK = True  # Enable CRC checking
 
 # ============================================================================
 # TLV PAYLOAD STRUCTURES (matching Arduino implementation)
@@ -126,8 +127,8 @@ class UARTTest:
         self.port = port
         self.baudrate = baudrate
         self.ser: Optional[serial.Serial] = None
-        self.encoder = Encoder(deviceId=DEVICE_ID, bufferSize=2048, crc=False)
-        self.decoder = Decoder(callback=self.decode_callback, crc=False)
+        self.encoder = Encoder(deviceId=DEVICE_ID, bufferSize=4096, crc=ENABLE_CRC_CHECK)
+        self.decoder = Decoder(callback=self.decode_callback, crc=ENABLE_CRC_CHECK)
 
         self.running = True
         self.last_heartbeat_time = 0
@@ -142,6 +143,7 @@ class UARTTest:
             'voltage_count': 0,
             'encoder_count': 0,
             'decode_errors': 0,
+            'decode_errors_by_type': {},  # Track errors by error code type
         }
 
     def connect(self) -> bool:
@@ -182,7 +184,7 @@ class UARTTest:
         self.stats['heartbeats_sent'] += 1
         self.heartbeat_count += 1
 
-        print(f"[TX] Heartbeat #{self.heartbeat_count} sent ({length} bytes)")
+        # print(f"[TX] Heartbeat #{self.heartbeat_count} sent ({length} bytes)")
 
     def send_dc_enable(self, motor_id: int, enable: bool, mode: int = 2):
         """Send DC_ENABLE command"""
@@ -233,6 +235,11 @@ class UARTTest:
         if error_code != DecodeErrorCode.NoError:
             print(f"[RX] Decode error: {error_code}")
             self.stats['decode_errors'] += 1
+            # Track errors by type
+            error_name = error_code.name if hasattr(error_code, 'name') else str(error_code)
+            if error_name not in self.stats['decode_errors_by_type']:
+                self.stats['decode_errors_by_type'][error_name] = 0
+            self.stats['decode_errors_by_type'][error_name] += 1
             return
 
         self.stats['messages_received'] += 1
@@ -301,7 +308,11 @@ class UARTTest:
         print(f"  System status: {self.stats['system_status_count']}")
         print(f"  Voltage data: {self.stats['voltage_count']}")
         print(f"  Encoder data: {self.stats['encoder_count']}")
-        print(f"  Decode errors: {self.stats['decode_errors']}")
+        print(f"  Total decode errors: {self.stats['decode_errors']}")
+        if self.stats['decode_errors_by_type']:
+            print("  Decode errors by type:")
+            for error_type, count in sorted(self.stats['decode_errors_by_type'].items()):
+                print(f"    {error_type}: {count}")
         print("="*60 + "\n")
 
     def run(self):
