@@ -44,9 +44,9 @@ from TLV_TypeDefs import *
 # ============================================================================
 
 DEFAULT_PORT = '/dev/ttyAMA0'  # Raspberry Pi serial port (GPIO 14/15)
-DEFAULT_BAUD = 115200  # Baud rate
+DEFAULT_BAUD = 500000  # Baud rate
 DEVICE_ID = 0x01  # RPi device ID
-HEARTBEAT_INTERVAL = 0.01  # Send heartbeat every 10 ms
+HEARTBEAT_INTERVAL = 0.2  # Send heartbeat every 10 ms
 ENABLE_CRC_CHECK = True  # Enable CRC checking
 
 # ============================================================================
@@ -245,7 +245,8 @@ class UARTTest:
         self.stats['messages_received'] += 1
 
         print(f"[RX] Frame from device 0x{frame_header.deviceId:02X}, "
-              f"frame #{frame_header.frameNum}, {frame_header.numTlvs} TLVs")
+              f"frame #{frame_header.frameNum}, {frame_header.numTlvs} TLVs"
+              f"; total decode error counts: {self.stats['decode_errors']}")
 
         for tlv_type, tlv_len, tlv_data in tlv_list:
             self.handle_tlv(tlv_type, tlv_len, tlv_data)
