@@ -25,6 +25,10 @@
  *   motor->moveSteps(200);
  *
  *   // Timer3 ISR is automatically configured by init()
+ *
+ * Note: A4988 Vref setup:
+ *   Vref = 8 * Imax * Rset (0.05Ω typical)
+ *   For 1.0A max current, Vref = 0.4V
  */
 
 #ifndef STEPPERMANAGER_H

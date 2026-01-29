@@ -821,6 +821,7 @@ arduino-cli upload -p /dev/cu.usbserial* --fqbn arduino:avr:mega tests/test_sche
 - `test_servo`: 14076 bytes (5% flash), 1014 bytes RAM (12%)
 - `arduino` (Phase 3): 15436 bytes (6% flash), 3410 bytes RAM (41%)
 - `arduino` (Phase 4): 17016 bytes (6% flash), 3785 bytes RAM (46%)
+- `arduino` (Phase 5): 19602 bytes (7% flash), 3886 bytes RAM (47%)
 
 | Test Folder | Phase | Purpose | Status |
 |-------------|-------|---------|--------|
@@ -879,15 +880,14 @@ See individual test files for implementation details.
 | **4** | `arduino.ino` integration | ✅ | 2026-01-27 | Phase 4 integrated, 17016 bytes (46% RAM) |
 | **4** | `test_stepper.ino` | ✅ | 2026-01-28 | 12560 bytes, interactive command interface |
 | **4** | `test_servo.ino` | ✅ | 2026-01-28 | 14076 bytes, 16-channel control + sweep |
-| **5** | `IMUDriver.h/cpp` | ⬜ | | ICM-20948 wrapper |
-| **5** | `UltrasonicDriver.h/cpp` | ⬜ | | I2C ultrasonic |
-| **5** | `NeoPixelDriver.h/cpp` | ⬜ | | LED library wrapper |
-| **5** | `SensorManager.h/cpp` | ⬜ | | Aggregation |
-| **5** | `UserIO.h/cpp` | ⬜ | | Buttons/LEDs |
-| **5** | `test_imu.ino` | ⬜ | | |
-| **5** | `test_voltage.ino` | ⬜ | | |
-| **5** | `test_buttons.ino` | ⬜ | | |
-| **5** | `test_leds.ino` | ⬜ | | |
+| **5** | `IMUDriver.h/cpp` | ✅ | 2026-01-28 | ICM-20948 wrapper (stub, library incomplete) |
+| **5** | `NeoPixelDriver.h/cpp` | ✅ | 2026-01-28 | Adafruit_NeoPixel wrapper |
+| **5** | `SensorManager.h/cpp` | ✅ | 2026-01-28 | ADC voltage + IMU aggregation |
+| **5** | `UserIO.h/cpp` | ✅ | 2026-01-28 | Buttons, LEDs, NeoPixel status |
+| **5** | `arduino.ino` integration | ✅ | 2026-01-28 | Phase 5 integrated, 19602 bytes (47% RAM) |
+| **5** | `test_voltage.ino` | 🔄 | | In progress |
+| **5** | `test_buttons.ino` | 🔄 | | In progress |
+| **5** | `test_leds.ino` | 🔄 | | In progress |
 | **6** | `arduino.ino` integration | ⬜ | | Full system |
 | **6** | `test_full_system.ino` | ⬜ | | |
 | **6** | End-to-end with RPi | ⬜ | | |

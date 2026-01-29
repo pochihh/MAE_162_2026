@@ -18,16 +18,23 @@
 
 #define DC_MOTOR_1_ENABLED      1       // Default wheel motor (left/right)
 #define DC_MOTOR_2_ENABLED      1       // Default wheel motor (left/right)
-#define DC_MOTOR_3_ENABLED      0       // Manipulator motor (optional)
-#define DC_MOTOR_4_ENABLED      0       // Manipulator motor (optional)
+#define DC_MOTOR_3_ENABLED      1       // Manipulator motor (optional)
+#define DC_MOTOR_4_ENABLED      1       // Manipulator motor (optional)
+
+// DC Motor direction inversion (H-bridge wiring correction)
+// Set to 1 to invert motor direction (swaps forward/reverse)
+#define DC_MOTOR_1_DIR_INVERTED 1       // 0=normal, 1=inverted
+#define DC_MOTOR_2_DIR_INVERTED 1       // 0=normal, 1=inverted
+#define DC_MOTOR_3_DIR_INVERTED 1       // 0=normal, 1=inverted
+#define DC_MOTOR_4_DIR_INVERTED 1       // 0=normal, 1=inverted
 
 // Stepper Motors
 #define NUM_STEPPERS            4       // Total stepper channels
 
-#define STEPPER_1_ENABLED       0
-#define STEPPER_2_ENABLED       0
-#define STEPPER_3_ENABLED       0
-#define STEPPER_4_ENABLED       0
+#define STEPPER_1_ENABLED       1
+#define STEPPER_2_ENABLED       1
+#define STEPPER_3_ENABLED       1
+#define STEPPER_4_ENABLED       1
 
 // Servos (via PCA9685)
 #define NUM_SERVO_CHANNELS      16      // PCA9685 provides 16 channels
@@ -50,6 +57,13 @@
 #define ENCODER_2_MODE          ENCODER_2X
 #define ENCODER_3_MODE          ENCODER_2X
 #define ENCODER_4_MODE          ENCODER_2X
+
+// Encoder direction inversion (polarity correction)
+// Set to 1 to invert encoder count direction (flips positive/negative)
+#define ENCODER_1_DIR_INVERTED  1       // 0=normal, 1=inverted
+#define ENCODER_2_DIR_INVERTED  1       // 0=normal, 1=inverted
+#define ENCODER_3_DIR_INVERTED  1       // 0=normal, 1=inverted
+#define ENCODER_4_DIR_INVERTED  1       // 0=normal, 1=inverted
 
 // ============================================================================
 // TIMING CONFIGURATION
@@ -101,9 +115,9 @@
 
 // Default PID gains for DC motors (runtime configurable via TLV)
 // Position PID (outer loop)
-#define DEFAULT_POS_KP          1.0f
+#define DEFAULT_POS_KP          1.8f
 #define DEFAULT_POS_KI          0.0f
-#define DEFAULT_POS_KD          0.0f
+#define DEFAULT_POS_KD          1.0f
 
 // Velocity PID (middle loop)
 #define DEFAULT_VEL_KP          0.5f

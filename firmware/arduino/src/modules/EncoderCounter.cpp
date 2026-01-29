@@ -12,14 +12,16 @@
 EncoderCounter2x::EncoderCounter2x()
     : count_(0)
     , lastEdgeUs_(0)
+    , invertDir_(false)
     , pinA_(0)
     , pinB_(0)
 {
 }
 
-void EncoderCounter2x::init(uint8_t pinA, uint8_t pinB) {
+void EncoderCounter2x::init(uint8_t pinA, uint8_t pinB, bool invertDir) {
     pinA_ = pinA;
     pinB_ = pinB;
+    invertDir_ = invertDir;
 
     // Configure pins
     pinMode(pinA_, INPUT);
@@ -67,11 +69,11 @@ void EncoderCounter2x::onInterruptA() {
     uint8_t a = digitalRead(pinA_);
     uint8_t b = digitalRead(pinB_);
 
-    if (a ^ b) {
-        count_++;  // Forward
-    } else {
-        count_--;  // Reverse
-    }
+    // Determine direction: A^B gives forward direction
+    bool forward = (a ^ b);
+
+    // Apply direction with inversion flag
+    count_ += invertDir_ ? (forward ? -1 : 1) : (forward ? 1 : -1);
 
     lastEdgeUs_ = micros();
 }
@@ -96,14 +98,16 @@ EncoderCounter4x::EncoderCounter4x()
     : count_(0)
     , lastEdgeUs_(0)
     , prevState_(0)
+    , invertDir_(false)
     , pinA_(0)
     , pinB_(0)
 {
 }
 
-void EncoderCounter4x::init(uint8_t pinA, uint8_t pinB) {
+void EncoderCounter4x::init(uint8_t pinA, uint8_t pinB, bool invertDir) {
     pinA_ = pinA;
     pinB_ = pinB;
+    invertDir_ = invertDir;
 
     // Configure pins
     pinMode(pinA_, INPUT);
@@ -189,7 +193,9 @@ void EncoderCounter4x::processEdge() {
     uint8_t index = (prevState_ << 2) | currState;
     int8_t delta = stateTable[index];
 
-    count_ += delta;
+    // Apply direction with inversion flag
+    count_ += invertDir_ ? -delta : delta;
+
     prevState_ = currState;
     lastEdgeUs_ = micros();
 }

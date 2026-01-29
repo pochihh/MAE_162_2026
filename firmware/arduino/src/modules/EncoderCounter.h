@@ -58,8 +58,9 @@ public:
      *
      * @param pinA Phase A pin (must support hardware interrupts)
      * @param pinB Phase B pin
+     * @param invertDir Direction inversion flag (false=normal, true=inverted)
      */
-    virtual void init(uint8_t pinA, uint8_t pinB) = 0;
+    virtual void init(uint8_t pinA, uint8_t pinB, bool invertDir = false) = 0;
 
     /**
      * @brief Get current encoder count
@@ -136,7 +137,7 @@ class EncoderCounter2x : public IEncoderCounter {
 public:
     EncoderCounter2x();
 
-    void init(uint8_t pinA, uint8_t pinB) override;
+    void init(uint8_t pinA, uint8_t pinB, bool invertDir = false) override;
     int32_t getCount() const override;
     void resetCount() override;
     void setCount(int32_t count) override;
@@ -148,6 +149,7 @@ public:
 private:
     volatile int32_t count_;         // Current encoder count
     volatile uint32_t lastEdgeUs_;   // Timestamp of last edge (micros())
+    bool invertDir_;                 // Direction inversion flag
     uint8_t pinA_;                   // Phase A pin number
     uint8_t pinB_;                   // Phase B pin number
 };
@@ -179,7 +181,7 @@ class EncoderCounter4x : public IEncoderCounter {
 public:
     EncoderCounter4x();
 
-    void init(uint8_t pinA, uint8_t pinB) override;
+    void init(uint8_t pinA, uint8_t pinB, bool invertDir = false) override;
     int32_t getCount() const override;
     void resetCount() override;
     void setCount(int32_t count) override;
@@ -192,6 +194,7 @@ private:
     volatile int32_t count_;         // Current encoder count
     volatile uint32_t lastEdgeUs_;   // Timestamp of last edge (micros())
     volatile uint8_t prevState_;     // Previous state (2 bits: A|B)
+    bool invertDir_;                 // Direction inversion flag
     uint8_t pinA_;                   // Phase A pin number
     uint8_t pinB_;                   // Phase B pin number
 

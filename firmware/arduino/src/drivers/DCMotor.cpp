@@ -81,6 +81,7 @@ DCMotor::DCMotor()
     , pinEN_(0)
     , pinIN1_(0)
     , pinIN2_(0)
+    , invertDir_(false)
     , mode_(DC_MODE_DISABLED)
     , targetPosition_(0)
     , targetVelocity_(0.0f)
@@ -91,10 +92,11 @@ DCMotor::DCMotor()
 {
 }
 
-void DCMotor::init(uint8_t motorId, IEncoderCounter *encoder, IVelocityEstimator *velocityEst) {
+void DCMotor::init(uint8_t motorId, IEncoderCounter *encoder, IVelocityEstimator *velocityEst, bool invertDir) {
     motorId_ = motorId;
     encoder_ = encoder;
     velocityEst_ = velocityEst;
+    invertDir_ = invertDir;
     lastUpdateUs_ = micros();
 }
 
@@ -262,6 +264,11 @@ void DCMotor::setPWM(int16_t pwm) {
     // Clamp PWM to valid range
     if (pwm > 255) pwm = 255;
     if (pwm < -255) pwm = -255;
+
+    // Apply motor direction inversion if configured
+    if (invertDir_) {
+        pwm = -pwm;  // Flip direction
+    }
 
     // Set direction pins based on sign
     if (pwm > 0) {

@@ -51,11 +51,11 @@
 #include "src/drivers/StepperMotor.h"
 #include "src/drivers/ServoController.h"
 
-// Phase 5+ includes (commented out until implemented)
-// #include "src/modules/SensorManager.h"
-// #include "src/modules/UserIO.h"
-// #include "src/drivers/IMUDriver.h"
-// #include "src/drivers/NeoPixelDriver.h"
+// Phase 5+ includes
+#include "src/modules/SensorManager.h"
+#include "src/modules/UserIO.h"
+#include "src/drivers/IMUDriver.h"
+#include "src/drivers/NeoPixelDriver.h"
 
 // ============================================================================
 // GLOBAL OBJECTS
@@ -179,18 +179,20 @@ void taskUARTComms() {
  * Runs every 20ms (50Hz).
  */
 void taskSensorRead() {
-  // Phase 5: Sensor reading will be implemented here
-  // For now, this is a placeholder
+  // Update all sensors
+  SensorManager::update();
 
-  // Future implementation:
-  // SensorManager::update();
-  //
-  // // Queue outgoing sensor data
+  // Future: Queue outgoing sensor data to RPi
   // MessageCenter::sendEncoderData();
   // MessageCenter::sendVoltageData();
   // if (IMU_ENABLED) {
   //   MessageCenter::sendIMUData();
   // }
+
+  // Check for low battery and update status LED
+  if (SensorManager::isBatteryLow()) {
+    UserIO::setLED(LED_RED, LED_BLINK, 255, 1000);
+  }
 }
 
 /**
@@ -202,11 +204,19 @@ void taskSensorRead() {
  * Runs every 50ms (20Hz).
  */
 void taskUserIO() {
-  // Phase 5: User I/O will be implemented here
-  // For now, this is a placeholder
+  // Update all user I/O (buttons, LEDs, NeoPixel)
+  UserIO::update();
 
-  // Future implementation:
-  // UserIO::update();
+  // Update system status on NeoPixel
+  if (!MessageCenter::isHeartbeatValid()) {
+    UserIO::setSystemStatus(STATUS_ERROR);  // Red for timeout
+  } else if (SensorManager::isBatteryLow()) {
+    UserIO::setSystemStatus(STATUS_WARNING);  // Yellow for low battery
+  } else if (StepperManager::anyMoving() || dcMotors[0].getMode() != DC_MODE_DISABLED) {
+    UserIO::setSystemStatus(STATUS_BUSY);  // Cyan for active
+  } else {
+    UserIO::setSystemStatus(STATUS_OK);  // Green for ready
+  }
 }
 
 // ============================================================================
@@ -224,8 +234,8 @@ void setup() {
 
   DEBUG_SERIAL.println();
   DEBUG_SERIAL.println(F("========================================"));
-  DEBUG_SERIAL.println(F("  MAE 162 Robot Firmware v0.4.0"));
-  DEBUG_SERIAL.println(F("  Phase 4: Steppers & Servos"));
+  DEBUG_SERIAL.println(F("  MAE 162 Robot Firmware v0.5.0"));
+  DEBUG_SERIAL.println(F("  Phase 5: Sensors & User I/O"));
   DEBUG_SERIAL.println(F("========================================"));
   DEBUG_SERIAL.println();
 
@@ -255,14 +265,14 @@ void setup() {
   // ------------------------------------------------------------------------
   // Phase 5: Initialize SensorManager
   // ------------------------------------------------------------------------
-  // DEBUG_SERIAL.println(F("[Setup] Initializing sensors..."));
-  // SensorManager::init();
+  DEBUG_SERIAL.println(F("[Setup] Initializing sensors..."));
+  SensorManager::init();
 
   // ------------------------------------------------------------------------
   // Phase 5: Initialize UserIO (LEDs, Buttons, NeoPixels)
   // ------------------------------------------------------------------------
-  // DEBUG_SERIAL.println(F("[Setup] Initializing user I/O..."));
-  // UserIO::init();
+  DEBUG_SERIAL.println(F("[Setup] Initializing user I/O..."));
+  UserIO::init();
 
   // ------------------------------------------------------------------------
   // Phase 4: Initialize ServoController (PCA9685)
@@ -292,12 +302,12 @@ void setup() {
 
   // Motor 1
 #if DC_MOTOR_1_ENABLED
-  encoder1.init(PIN_M1_ENC_A, PIN_M1_ENC_B);
+  encoder1.init(PIN_M1_ENC_A, PIN_M1_ENC_B, ENCODER_1_DIR_INVERTED);
   velocityEst1.init(countsPerRev);
   velocityEst1.setFilterSize(VELOCITY_FILTER_SIZE);
   velocityEst1.setZeroTimeout(VELOCITY_ZERO_TIMEOUT);
 
-  dcMotors[0].init(0, &encoder1, &velocityEst1);
+  dcMotors[0].init(0, &encoder1, &velocityEst1, DC_MOTOR_1_DIR_INVERTED);
   dcMotors[0].setPins(PIN_M1_EN, PIN_M1_IN1, PIN_M1_IN2);
   dcMotors[0].setPositionPID(DEFAULT_POS_KP, DEFAULT_POS_KI, DEFAULT_POS_KD);
   dcMotors[0].setVelocityPID(DEFAULT_VEL_KP, DEFAULT_VEL_KI, DEFAULT_VEL_KD);
@@ -306,12 +316,12 @@ void setup() {
 
   // Motor 2
 #if DC_MOTOR_2_ENABLED
-  encoder2.init(PIN_M2_ENC_A, PIN_M2_ENC_B);
+  encoder2.init(PIN_M2_ENC_A, PIN_M2_ENC_B, ENCODER_2_DIR_INVERTED);
   velocityEst2.init(countsPerRev);
   velocityEst2.setFilterSize(VELOCITY_FILTER_SIZE);
   velocityEst2.setZeroTimeout(VELOCITY_ZERO_TIMEOUT);
 
-  dcMotors[1].init(1, &encoder2, &velocityEst2);
+  dcMotors[1].init(1, &encoder2, &velocityEst2, DC_MOTOR_2_DIR_INVERTED);
   dcMotors[1].setPins(PIN_M2_EN, PIN_M2_IN1, PIN_M2_IN2);
   dcMotors[1].setPositionPID(DEFAULT_POS_KP, DEFAULT_POS_KI, DEFAULT_POS_KD);
   dcMotors[1].setVelocityPID(DEFAULT_VEL_KP, DEFAULT_VEL_KI, DEFAULT_VEL_KD);
@@ -320,12 +330,12 @@ void setup() {
 
   // Motor 3
 #if DC_MOTOR_3_ENABLED
-  encoder3.init(PIN_M3_ENC_A, PIN_M3_ENC_B);
+  encoder3.init(PIN_M3_ENC_A, PIN_M3_ENC_B, ENCODER_3_DIR_INVERTED);
   velocityEst3.init(countsPerRev);
   velocityEst3.setFilterSize(VELOCITY_FILTER_SIZE);
   velocityEst3.setZeroTimeout(VELOCITY_ZERO_TIMEOUT);
 
-  dcMotors[2].init(2, &encoder3, &velocityEst3);
+  dcMotors[2].init(2, &encoder3, &velocityEst3, DC_MOTOR_3_DIR_INVERTED);
   dcMotors[2].setPins(PIN_M3_EN, PIN_M3_IN1, PIN_M3_IN2);
   dcMotors[2].setPositionPID(DEFAULT_POS_KP, DEFAULT_POS_KI, DEFAULT_POS_KD);
   dcMotors[2].setVelocityPID(DEFAULT_VEL_KP, DEFAULT_VEL_KI, DEFAULT_VEL_KD);
@@ -334,12 +344,12 @@ void setup() {
 
   // Motor 4
 #if DC_MOTOR_4_ENABLED
-  encoder4.init(PIN_M4_ENC_A, PIN_M4_ENC_B);
+  encoder4.init(PIN_M4_ENC_A, PIN_M4_ENC_B, ENCODER_4_DIR_INVERTED);
   velocityEst4.init(countsPerRev);
   velocityEst4.setFilterSize(VELOCITY_FILTER_SIZE);
   velocityEst4.setZeroTimeout(VELOCITY_ZERO_TIMEOUT);
 
-  dcMotors[3].init(3, &encoder4, &velocityEst4);
+  dcMotors[3].init(3, &encoder4, &velocityEst4, DC_MOTOR_4_DIR_INVERTED);
   dcMotors[3].setPins(PIN_M4_EN, PIN_M4_IN1, PIN_M4_IN2);
   dcMotors[3].setPositionPID(DEFAULT_POS_KP, DEFAULT_POS_KI, DEFAULT_POS_KD);
   dcMotors[3].setVelocityPID(DEFAULT_VEL_KP, DEFAULT_VEL_KI, DEFAULT_VEL_KD);

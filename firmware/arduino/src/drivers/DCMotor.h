@@ -136,8 +136,9 @@ public:
      * @param motorId Motor identifier (0-3)
      * @param encoder Pointer to encoder counter instance
      * @param velocityEst Pointer to velocity estimator instance
+     * @param invertDir Direction inversion flag (false=normal, true=inverted)
      */
-    void init(uint8_t motorId, IEncoderCounter *encoder, IVelocityEstimator *velocityEst);
+    void init(uint8_t motorId, IEncoderCounter *encoder, IVelocityEstimator *velocityEst, bool invertDir = false);
 
     /**
      * @brief Configure hardware pins
@@ -280,6 +281,7 @@ private:
     uint8_t pinEN_;                         // PWM pin (speed)
     uint8_t pinIN1_;                        // Direction pin 1
     uint8_t pinIN2_;                        // Direction pin 2
+    bool invertDir_;                        // Direction inversion flag
 
     // Control state
     DCMotorMode mode_;                      // Current control mode
