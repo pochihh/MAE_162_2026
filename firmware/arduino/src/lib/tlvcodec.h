@@ -11,6 +11,10 @@
 #include <stddef.h>
 #include <stdbool.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 // define TLVCodec structs
 
 struct FrameHeader
@@ -115,5 +119,9 @@ extern size_t MAX_TLVS; // max number of TLVs in a frame
 // CRC32
 #define CRC32_BYTES2IGNORE 16 // first 16 bytes of header
 uint32_t CRC32(const uint8_t *data, size_t length);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif // TLV_CODEC_H
