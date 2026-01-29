@@ -103,7 +103,7 @@ void encoderISR_M2() {
  * @param pwm PWM value (-255 to +255, negative = reverse)
  */
 void setMotorPWM(uint8_t motorId, int16_t pwm) {
-    uint8_t pinEN, pinIN1, pinIN2;
+    uint8_t pinEN, pinIN1, pinIN2, dir;
 
     // Select pins based on motor ID
     switch (motorId) {
@@ -111,17 +111,20 @@ void setMotorPWM(uint8_t motorId, int16_t pwm) {
             pinEN = PIN_M1_EN;
             pinIN1 = PIN_M1_IN1;
             pinIN2 = PIN_M1_IN2;
+            dir = DC_MOTOR_1_DIR_INVERTED;
             break;
         case 1:
             pinEN = PIN_M2_EN;
             pinIN1 = PIN_M2_IN1;
             pinIN2 = PIN_M2_IN2;
+            dir = DC_MOTOR_2_DIR_INVERTED;
             break;
 #if DC_MOTOR_3_ENABLED
         case 2:
             pinEN = PIN_M3_EN;
             pinIN1 = PIN_M3_IN1;
             pinIN2 = PIN_M3_IN2;
+            dir = DC_MOTOR_3_DIR_INVERTED;
             break;
 #endif
 #if DC_MOTOR_4_ENABLED
@@ -129,6 +132,7 @@ void setMotorPWM(uint8_t motorId, int16_t pwm) {
             pinEN = PIN_M4_EN;
             pinIN1 = PIN_M4_IN1;
             pinIN2 = PIN_M4_IN2;
+            dir = DC_MOTOR_4_DIR_INVERTED;
             break;
 #endif
         default:
@@ -139,6 +143,8 @@ void setMotorPWM(uint8_t motorId, int16_t pwm) {
     if (pwm > 255) pwm = 255;
     if (pwm < -255) pwm = -255;
 
+    pwm = dir ? -pwm : pwm;  // Apply direction inversion if needed
+    
     // Set direction and PWM
     if (pwm > 0) {
         // Forward
@@ -205,9 +211,9 @@ void setup() {
 
     DEBUG_SERIAL.println(F("[Setup] Motor control pins configured"));
 
-    // Initialize encoders
-    encoder1.init(PIN_M1_ENC_A, PIN_M1_ENC_B);
-    encoder2.init(PIN_M2_ENC_A, PIN_M2_ENC_B);
+    // Initialize encoders (with direction flags from config.h)
+    encoder1.init(PIN_M1_ENC_A, PIN_M1_ENC_B, ENCODER_1_DIR_INVERTED);
+    encoder2.init(PIN_M2_ENC_A, PIN_M2_ENC_B, ENCODER_2_DIR_INVERTED);
 
     // Attach interrupt handlers
     attachInterrupt(digitalPinToInterrupt(PIN_M1_ENC_A), encoderISR_M1, CHANGE);

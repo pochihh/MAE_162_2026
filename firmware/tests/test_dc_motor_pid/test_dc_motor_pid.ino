@@ -228,9 +228,9 @@ void setup() {
     Scheduler::init();
     DEBUG_SERIAL.println(F("[Setup] Scheduler initialized"));
 
-    // Initialize encoders
-    encoder1.init(PIN_M1_ENC_A, PIN_M1_ENC_B);
-    encoder2.init(PIN_M2_ENC_A, PIN_M2_ENC_B);
+    // Initialize encoders (with direction flags from config.h)
+    encoder1.init(PIN_M1_ENC_A, PIN_M1_ENC_B, ENCODER_1_DIR_INVERTED);
+    encoder2.init(PIN_M2_ENC_A, PIN_M2_ENC_B, ENCODER_2_DIR_INVERTED);
     DEBUG_SERIAL.println(F("[Setup] Encoders initialized"));
 
     // Attach interrupt handlers
@@ -252,13 +252,13 @@ void setup() {
     DEBUG_SERIAL.print(F("  - Counts per rev: "));
     DEBUG_SERIAL.println(countsPerRev);
 
-    // Initialize motors
-    motor1.init(0, &encoder1, &velocityEst1);
+    // Initialize motors (with direction flags from config.h)
+    motor1.init(0, &encoder1, &velocityEst1, DC_MOTOR_1_DIR_INVERTED);
     motor1.setPins(PIN_M1_EN, PIN_M1_IN1, PIN_M1_IN2);
     motor1.setPositionPID(DEFAULT_POS_KP, DEFAULT_POS_KI, DEFAULT_POS_KD);
     motor1.setVelocityPID(DEFAULT_VEL_KP, DEFAULT_VEL_KI, DEFAULT_VEL_KD);
 
-    motor2.init(1, &encoder2, &velocityEst2);
+    motor2.init(1, &encoder2, &velocityEst2, DC_MOTOR_2_DIR_INVERTED);
     motor2.setPins(PIN_M2_EN, PIN_M2_IN1, PIN_M2_IN2);
     motor2.setPositionPID(DEFAULT_POS_KP, DEFAULT_POS_KI, DEFAULT_POS_KD);
     motor2.setVelocityPID(DEFAULT_VEL_KP, DEFAULT_VEL_KI, DEFAULT_VEL_KD);
@@ -280,7 +280,7 @@ void setup() {
     // Register scheduler tasks
     Scheduler::registerTask(taskMotorPID, 5, 0);           // 5ms (200Hz)
     Scheduler::registerTask(taskPrintStatus, 200, 1);      // 200ms (5Hz)
-    Scheduler::registerTask(taskTestStateMachine, 1000, 2); // 1000ms (1Hz)
+    Scheduler::registerTask(taskTestStateMachine, 2000, 2); // 1000ms (1Hz)
 
     DEBUG_SERIAL.println(F("[Setup] Tasks registered"));
     DEBUG_SERIAL.println();

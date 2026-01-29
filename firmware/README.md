@@ -205,6 +205,9 @@ Sensor data is sent as separate packets grouped by sensor type. If multiple sens
 - Serial1 (pins 18/19): NOT AVAILABLE (used for encoder interrupts)
 - Serial3 (pins 14/15): NOT AVAILABLE (used for stepper STEP signals)
 
-
+## Know issues
+### Stepper motor
+- When a stepper is disabled in config.h, the StepperMotor won't be able show the user that it's disabled in the config.h. 
+- 
 
 

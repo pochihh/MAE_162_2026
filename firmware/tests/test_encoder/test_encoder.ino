@@ -105,16 +105,16 @@ void setup() {
     DEBUG_SERIAL.println(F("  Encoder Counter Test - Phase 3"));
     DEBUG_SERIAL.println(F("========================================"));
 
-    // Initialize encoders
-    encoder1.init(PIN_M1_ENC_A, PIN_M1_ENC_B);
-    encoder2.init(PIN_M2_ENC_A, PIN_M2_ENC_B);
+    // Initialize encoders (with direction flags from config.h)
+    encoder1.init(PIN_M1_ENC_A, PIN_M1_ENC_B, ENCODER_1_DIR_INVERTED);
+    encoder2.init(PIN_M2_ENC_A, PIN_M2_ENC_B, ENCODER_2_DIR_INVERTED);
 
 #if DC_MOTOR_3_ENABLED
-    encoder3.init(PIN_M3_ENC_A, PIN_M3_ENC_B);
+    encoder3.init(PIN_M3_ENC_A, PIN_M3_ENC_B, ENCODER_3_DIR_INVERTED);
 #endif
 
 #if DC_MOTOR_4_ENABLED
-    encoder4.init(PIN_M4_ENC_A, PIN_M4_ENC_B);
+    encoder4.init(PIN_M4_ENC_A, PIN_M4_ENC_B, ENCODER_4_DIR_INVERTED);
 #endif
 
     DEBUG_SERIAL.println(F("[Setup] Encoders initialized"));
