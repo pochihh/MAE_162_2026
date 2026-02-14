@@ -1,10 +1,40 @@
-# PCB Design Specifications
+# The NUEVO Board - Technical Specifications
+**Navigation Unit for Education and Versatile Operations**
 
 **Project:** MAE 162 Educational Robotics Platform
-**Design Tool:** EasyEDA
-**Last Updated:** 2025-12-15
+**Board Revision:** Rev. B (Production)
+**Design Tool:** EasyEDA (online schematic/layout tool)
+**Design Status:** Complete - Fabricated and awaiting delivery
+**Last Updated:** 2026-02-13
 
-**Design Philosophy:** Maximize use of off-the-shelf modules for educational value, ease of troubleshooting, and design flexibility. The custom PCB focuses on power management, microcontroller integration, and providing clean interfaces to external modules.
+---
+
+## Design Philosophy
+
+This PCB maximizes use of off-the-shelf modules for educational value, ease of troubleshooting, and design flexibility. The custom board focuses on:
+- **Robust power management** (dual buck converters with thermal management)
+- **Microcontroller integration** (Arduino Mega 2560 + Raspberry Pi 5)
+- **Clean module interfaces** (external H-bridges, stepper drivers, servo controllers)
+- **Educational accessibility** (clear labeling, test points, modular troubleshooting)
+
+---
+
+## Revision History
+
+| Revision | Date | Status | Key Changes |
+|----------|------|--------|-------------|
+| **Rev. B** | 2026-02 | Production | Full 4x encoder support, pin relocations for interrupt optimization, Timer 3 conflict resolution, finalized power budget |
+| **Rev. A** | 2025-12 | Initial prototype | First production design with modular architecture |
+
+---
+
+## Document Purpose
+
+This document contains **complete technical specifications** for the MAE 162 custom PCB, including detailed electrical design, component selections, pin assignments, and design rationale.
+
+**For operational information** (how to use the board, power-up procedures, configuration, troubleshooting), see **[README.md](README.md)** - the user guide.
+
+**Target Audience:** PCB designers, firmware developers, teaching assistants, and anyone needing detailed technical reference.
 
 ---
 
@@ -217,12 +247,25 @@
 - **Module:** Adafruit PCA9685 16-channel PWM board or compatible
 - **Connection:** I2C bus (SDA/SCL) + servo power rail
 - **Power Distribution on PCB:**
-  - Servo power rail header (6V fixed from DC-DC converter)
+  - Servo power rail (adjustable 5-10V from DC-DC converter, default ~6V)
   - GND distribution
-  - I2C connection to Arduino (SDA/SCL)
+  - I2C connection to Arduino (SDA/SCL, 3.3V via Qwiic connector)
 - **Connectors on PCB:**
-  - 4-pin header for PCA9685 module (VCC, GND, SDA, SCL)
-  - Optional: Screw terminals for servo power distribution to PCA9685 V+ pin
+  - **J_PCA9685**: 4-pin header (VCC, GND, SDA, SCL)
+    - VCC connects to Qwiic 3.3V rail (for PCA9685 logic power)
+    - Can also use Qwiic connector for I2C connection
+  - **JP_SERVO_PWR**: Jumper to enable servo rail power to PCA9685 VCC input
+    - **Jumper CLOSED:** Servo rail directly powers PCA9685 V+ (no external cable needed)
+    - **Jumper OPEN:** PCA9685 V+ must be powered externally
+
+**Servo Power Configuration:**
+- **Option 1 (Recommended):** Close JP_SERVO_PWR jumper
+  - Servo rail voltage (5-10V) automatically supplied to PCA9685 V+
+  - PCA9685 logic powered from 3.3V via I2C connection
+  - No external power cable needed
+- **Option 2:** Open JP_SERVO_PWR jumper
+  - User supplies external servo power to PCA9685 V+ terminal
+  - Useful for separate high-current servo power supply
 
 **Note:** Servos plug directly into PCA9685 module, not into the main PCB
 
@@ -243,23 +286,41 @@
 - Arduino TX2 (pin 16) → Level Shifter → RPi GPIO15 (RXD0)
 - Arduino RX2 (pin 17) ← Level Shifter ← RPi GPIO14 (TXD0)
 
-### 4.2 I2C (Qwiic/STEMMA QT)
-**Arduino I2C (two configurable banks):**
-- **4x Qwiic connectors total**, split into **Bank A (2x)** and **Bank B (2x)**, all on Arduino pins 20/21.
-- Each bank has its own 3-pin voltage-select jumper (QWIIC_VSEL_A / QWIIC_VSEL_B) to choose 5V or 3.3V_LDO for VCC and signal level.
-- Each bank uses its own TXS0102: VCCA = selected bank VCC (3.3V or 5V), VCCB = Arduino 5V, OE pulled up to VCCA with RC delay.
-- Pull-ups per bank: 4.7kΩ from SDA/SCL (bank side) to that bank’s selected VCC.
-- 5V mode: jumper to 5V; TXS0102 still passes signals (A/B both at 5V).
-- 3.3V mode: jumper to 3.3V_LDO; TXS0102 level-shifts to Arduino 5V.
-- Typical devices: PCA9685 servo controller, IMU, OLED display, sensors. Label bank voltages clearly on silkscreen.
+### 4.2 I2C (Qwiic/STEMMA QT) - Rev. B Simplified Design
 
-**Raspberry Pi I2C:**
-- **2x Qwiic connectors** (JST-SH 4-pin, 1mm pitch) in parallel
-- All connected to RPi GPIO2 (SDA) / GPIO3 (SCL)
-- Single set of pull-up resistors: 4.7kΩ to 3.3V (one set for entire bus)
-- Separate bus from Arduino (no level shifting needed)
+**Arduino I2C (3.3V with Level Shifting):**
+- **4x Qwiic connectors** (J_QWIIC_1 to J_QWIIC_4): JST-SH 4-pin, 1mm pitch
+- All connected to Arduino pins 20/21 (SDA/SCL) in parallel
+- **Fixed 3.3V power rail** (from on-board 3.3V LDO)
+- **Level shifting:** TXS0102 bidirectional translator (Arduino 5V ↔ Qwiic 3.3V)
+  - VCCA = Arduino 5V (SDA/SCL signals from Arduino)
+  - VCCB = 3.3V (SDA/SCL signals to Qwiic devices)
+  - OE pulled high with RC delay for proper startup
+- **Pull-up resistors:** 4.7kΩ on Qwiic side (3.3V) - single set for entire bus
+- **Compatible with:** All standard Qwiic/STEMMA QT devices (ICM-20948, BNO085, OLED displays, etc.)
 
-**Note:** Multiple Qwiic connectors on same bus are for convenience - students can plug in multiple modules without external splitters
+**Qwiic Connector Pinout (for custom cables):**
+| Pin | Signal | Wire Color (Standard) | Voltage |
+|-----|--------|-----------------------|---------|
+| 1 | GND | Black | 0V |
+| 2 | VCC | Red | 3.3V |
+| 3 | SDA | Blue | 3.3V logic |
+| 4 | SCL | Yellow | 3.3V logic |
+
+**Raspberry Pi I2C (3.3V Native):**
+- **2x Qwiic connectors** (J_QWIIC_RPI1, J_QWIIC_RPI2): JST-SH 4-pin, 1mm pitch
+- All connected to RPi GPIO2 (SDA) / GPIO3 (SCL) in parallel
+- **Voltage:** 3.3V (native RPi logic level, no level shifting)
+- **Pull-up resistors:** 4.7kΩ to 3.3V (single set for entire bus)
+- **Separate bus from Arduino** - no electrical connection to Arduino I2C
+
+**Design Rationale (Rev. B Change):**
+- **Simplified from Rev. A:** Removed voltage selection jumpers (Bank A/B)
+- **Reasoning:** All modern Qwiic/STEMMA QT devices are 3.3V compatible
+- **Benefit:** Fewer configuration errors, simpler student setup
+- **Trade-off:** Cannot directly connect 5V-only I2C devices to Qwiic connectors (use separate I2C header if needed)
+
+**Note:** Multiple Qwiic connectors on same bus are for daisy-chaining - students can connect multiple modules without external splitters
 
 ---
 
@@ -431,17 +492,26 @@ pinMode(LIMIT_PIN, INPUT);  // No pullup, sensor drives HIGH/LOW
 - Encoders: 4-pin headers (VCC, GND, A, B)
 
 **Servos:**
-- 3-pin headers (0.1" pitch) x 12 channels (on the PCA)
+- 3-pin headers (0.1" pitch) x 16 channels (on external PCA9685 module)
+- PCA9685 power: JP_SERVO_PWR jumper enables direct servo rail connection
 
 **Communication:**
-- Qwiic (Arduino): JST-SH 4-pin, 1mm pitch (x4, all parallel on Arduino I2C bus)
-- Qwiic (RPi): JST-SH 4-pin, 1mm pitch (x2, all parallel on RPi I2C bus)
-- UART: Not exposed externally (internal Arduino-RPi connection)
+- Qwiic (Arduino): JST-SH 4-pin, 1mm pitch (x4: J_QWIIC_1 to J_QWIIC_4)
+  - All parallel on Arduino I2C bus (pins 20/21)
+  - Fixed 3.3V power, level-shifted signals
+- Qwiic (RPi): JST-SH 4-pin, 1mm pitch (x2: J_QWIIC_RPI1, J_QWIIC_RPI2)
+  - All parallel on RPi I2C bus (GPIO2/GPIO3)
+  - Native 3.3V (no level shifting)
+- UART: Not exposed externally (internal Arduino-RPi connection via TXB0104)
 
 **Limit Switches:**
 - Limit switch connectors: JST XH 2.54mm 3-pin (x8, pins 40, 41, 48-53)
 - Pinout: V (power), S (signal), G (ground)
 - Voltage select jumper: 3-pin header (JP_LIM_V) for 5V or 3.3V selection
+
+**Configuration Jumpers:**
+- JP_LIM_V: Limit switch voltage selection (5V or 3.3V)
+- JP_SERVO_PWR: PCA9685 servo rail power enable (ON/OFF)
 
 **Expansion:**
 - GPIO: Screw terminals or 0.1" pin headers
@@ -505,8 +575,78 @@ pinMode(LIMIT_PIN, INPUT);  // No pullup, sensor drives HIGH/LOW
 ---
 
 ## 10. GPIO Pin Assignment Table
+### 10.1 Arduino Mega 2560 Pin Allocation [Rev. B]
+**Exposed pins are available on screw terminals/headers for reuse; core comms and default wheel drive pins remain internal.**
 
-### 10.1 Arduino Mega 2560 Pin Allocation
+| Pin(s) | Pin Name | Function | Exposed? | Notes |
+|--------|----------|----------|----------|-------|
+| 0 (RX0) | RX0 | USB Serial | No | Programming/debug only |
+| 1 (TX0) | TX0 | USB Serial | No | Programming/debug only |
+| 2 (INT0) | M1_ENC_A | Motor 1 Encoder A | No | Default left/right wheel encoder A |
+| 3 (INT1) | M1_ENC_B | Motor 1 Encoder B | No | 4x quadrature mode for M1 (wheel) |
+| 4 | M2_IN1 | Motor 2 Direction IN1 | No | Relocated from pin 12 (Rev. A) |
+| 5 (PWM) | LED_RED | Status LED Red | No | Error/low battery, relocated from pin 11 (Rev. A) |
+| 6 (PWM Timer 4) | M1_EN | Motor 1 PWM Enable | No | Relocated from pin 5 (Rev. A) |
+| 7 (PWM Timer 4) | M2_EN | Motor 2 PWM Enable | No | Relocated from pin 6 (Rev. A) |
+| 8 (PWM) | M1_IN1 | Motor 1 Direction IN1 | No | Default wheel direction |
+| 9 (PWM, timer 2) | M3_EN | Motor 3 PWM Enable | Yes | Manipulator motor |
+| 10 (PWM, timer 2) | M4_EN | Motor 4 PWM Enable | Yes | Manipulator motor |
+| 11 (PWM) | M4_ENC_A | Motor 4 Encoder A (PCINT5) | Yes | 4x mode via PCINT, relocated from pin 19 (Rev. A) |
+| 12 | M4_ENC_B | Motor 4 Encoder B (PCINT6) | Yes | 4x mode via PCINT, relocated from pin 31 (Rev. A) |
+| 13 | USER_P13 | User GPIO / General Purpose | Yes | Available for custom use |
+| 14 | ST1_STEP | Stepper 1 STEP | Yes | Stepper control |
+| 15 | ST2_STEP | Stepper 2 STEP | Yes | Stepper control |
+| 16 (TX2) | TX_RPI | **UART to RPi5** | No | Via level shifter (5V → 3.3V) |
+| 17 (RX2) | RX_RPI | **UART from RPi5** | No | Via level shifter (3.3V → 5V) |
+| 18 (INT5) | M2_ENC_A | Motor 2 Encoder A | No | 4x quadrature mode for M2 (wheel), relocated from pin 3 (Rev. A) |
+| 19 (INT4) | M2_ENC_B | Motor 2 Encoder B | No | 4x quadrature mode for M2 (wheel), relocated from pin 7 (Rev. A) |
+| 20 (SDA) | SDA | I2C Data | Yes | Qwiic + PCA9685 module |
+| 21 (SCL) | SCL | I2C Clock | Yes | Qwiic + PCA9685 module |
+| 22 | ST1_DIR | Stepper 1 DIR | Yes | Stepper direction |
+| 23 | ST2_DIR | Stepper 2 DIR | Yes | Stepper direction |
+| 24 | ST3_DIR | Stepper 3 DIR | Yes | Stepper direction |
+| 25 | ST4_DIR | Stepper 4 DIR | Yes | Stepper direction |
+| 26 | ST1_EN | Stepper 1 ENABLE | Yes | Individual enable |
+| 27 | ST2_EN | Stepper 2 ENABLE | Yes | Individual enable |
+| 28 | ST3_EN | Stepper 3 ENABLE | Yes | Individual enable |
+| 29 | ST4_EN | Stepper 4 ENABLE | Yes | Individual enable |
+| 30 | M2_IN2 | Motor 2 Direction IN2 | No | Relocated from pin 13 (Rev. A) |
+| 31 | USER_P31 | User GPIO / General Purpose | Yes | Available for custom use |
+| 32 | ST3_STEP | Stepper 3 STEP | Yes | Stepper control |
+| 33 | ST4_STEP | Stepper 4 STEP | Yes | Stepper control |
+| 34 | M3_IN1 | Motor 3 IN1 | Yes | Direction |
+| 35 | M3_IN2 | Motor 3 IN2 | Yes | Direction |
+| 36 | M4_IN1 | Motor 4 IN1 | Yes | Direction |
+| 37 | M4_IN2 | Motor 4 IN2 | Yes | Direction |
+| 38 | BTN1 | User Button 1 | No | On-board only, INPUT_PULLUP |
+| 39 | BTN2 | User Button 2 | No | On-board only, INPUT_PULLUP |
+| 40 | LIM1 / BTN3 | Limit Switch 1 / Button 3 | Yes | JST XH 3-pin (V, S, G) |
+| 41 | LIM2 / BTN4 | Limit Switch 2 / Button 4 | Yes | JST XH 3-pin (V, S, G) |
+| 42 | NEOPIXEL_DIN | WS2812B RGB LED Data | No | NeoPixel control |
+| 43 | M1_IN2 | Motor 1 IN2 | No | Default wheel direction |
+| 44 (PWM) | LED_GREEN | Status LED Green | No | System OK (default) |
+| 45 (PWM) | LED_BLUE | User LED Blue | Yes | Exposed for user |
+| 46 (PWM) | LED_ORANGE | User LED Orange | Yes | Exposed for user |
+| 47 | LED_PURPLE | User LED Purple | Yes | Exposed for user (non-PWM) |
+| 48 | LIM3 / BTN5 | Limit Switch 3 / Button 5 | Yes | JST XH 3-pin (V, S, G) |
+| 49 | LIM4 / BTN6 | Limit Switch 4 / Button 6 | Yes | JST XH 3-pin (V, S, G) |
+| 50 | LIM5 / BTN7 | Limit Switch 5 / Button 7 | Yes | JST XH 3-pin (V, S, G) |
+| 51 | LIM6 / BTN8 | Limit Switch 6 / Button 8 | Yes | JST XH 3-pin (V, S, G) |
+| 52 | LIM7 / BTN9 | Limit Switch 7 / Button 9 | Yes | JST XH 3-pin (V, S, G) |
+| 53 | LIM8 / BTN10 | Limit Switch 8 / Button 10 | Yes | JST XH 3-pin (V, S, G) |
+| A0 | VBAT_SENSE | Battery Voltage Monitor | No | Divider 1:6 on BAT_IN |
+| A1 | V5_SENSE | 5V Rail Monitor | No | Divider 1:2 after 5V buck |
+| A2 | VSERVO_SENSE | Servo Rail Monitor | No | Divider 1:3 servo rail |
+| A3 | M1_CT | Motor 1 Current Sense (CT) | No | H-bridge feedback |
+| A4 | M2_CT | Motor 2 Current Sense (CT) | No | H-bridge feedback |
+| A5 | M3_CT | Motor 3 Current Sense (CT) | Yes | H-bridge feedback |
+| A6 | M4_CT | Motor 4 Current Sense (CT) | Yes | H-bridge feedback |
+| A7-A13 | ANALOG_EXP | Analog Expansion | Yes | Available for sensors |
+| A14 | M3_ENC_A | Motor 3 Encoder A (PCINT14) | Yes | 4x mode via PCINT, relocated from pin 18 (Rev. A) |
+| A15 | M3_ENC_B | Motor 3 Encoder B (PCINT15) | Yes | 4x mode via PCINT, relocated from pin 30 (Rev. A) |
+
+
+### 10.2 Arduino Mega 2560 Pin Allocation [Rev. A]
 **Exposed pins are available on screw terminals/headers for reuse; core comms and default wheel drive pins remain internal.**
 
 | Pin(s) | Pin Name | Function | Exposed? | Notes |
@@ -606,31 +746,38 @@ pinMode(LIMIT_PIN, INPUT);  // No pullup, sensor drives HIGH/LOW
 
 ---
 
-## 11. Design Verification Checklist
+## 11. Design Verification Checklist (Rev. B - Complete)
 
-### Electrical
-- [ ] All power rails properly decoupled (bulk + ceramic capacitors)
-- [ ] Battery voltage divider sized for 5V max at highest battery voltage
-- [ ] Level shifters correctly oriented (5V ↔ 3.3V)
-- [ ] Pull-up resistors on I2C lines (4.7kΩ)
-- [ ] Pull-ups on button inputs (10kΩ to 5V)
-- [ ] Flyback diodes on all inductive loads (or verify in driver modules)
-- [ ] Reverse polarity protection on battery input
-- [ ] Fuse rated for maximum expected current draw
-- [ ] ESD protection on external connectors
-- [ ] Heatsink provision for DC-DC converters (thermal vias, copper pour)
-- [ ] Trace widths adequate for current loads (≥40mil for battery, ≥30mil for DC-DC outputs, ≥10mil for logic)
-- [ ] Ground plane continuous and well-connected
-- [ ] Test points on critical signals (5V, 3.3V, servo rail, battery voltage)
+### Electrical Design ✅
+- [x] All power rails properly decoupled (bulk + ceramic capacitors)
+- [x] Battery voltage divider sized for 5V max at highest battery voltage (1:6 ratio)
+- [x] Level shifters correctly oriented (5V ↔ 3.3V with TXB0104 and TXS0102)
+- [x] Pull-up resistors on I2C lines (4.7kΩ per bank)
+- [x] Pull-ups on button inputs (Arduino internal INPUT_PULLUP, 10-50kΩ)
+- [x] Flyback diodes verified in external driver modules (H-bridge, stepper drivers)
+- [x] Reverse polarity protection on battery input (IRF4905 P-MOSFET circuit)
+- [x] Fuse rated for expected current draw (15A blade fuse, upgradeable to 20A)
+- [x] ESD protection on external connectors (TVS diodes where needed)
+- [x] Heatsink provision for DC-DC converters (thermal vias, 2oz copper, bottom pour)
+- [x] Trace widths adequate: ≥40mil battery, ≥30mil DC-DC outputs, ≥10mil logic
+- [x] Ground plane continuous with stitching vias
+- [x] Test points on critical signals (5V, 3.3V, servo rail, battery, key GPIO)
 
-### Mechanical
-- [ ] Main mounting holes (4x M3/M4) aligned with chassis design
-- [ ] Display mounting holes (4x M2.5) positioned for RPi 5 official 5-inch display
-- [ ] Standoff clearance verified (10-15mm minimum)
-- [ ] Keep-out zones marked for display cable routing
-- [ ] Board size accommodates all connectors with access clearance
-- [ ] Silkscreen labels clear and educational (for student assembly)
-- [ ] Component heights verified for enclosure fit
+### Mechanical Design ✅
+- [x] Main mounting holes (4x M3/M4) positioned for chassis integration
+- [x] Display mounting holes (4x M2.5) for RPi 5 official 5-inch display (optional)
+- [x] Standoff clearance 10-15mm verified for component heights
+- [x] Keep-out zones marked for display cable routing and clearance
+- [x] Board size accommodates all connectors with access clearance
+- [x] Silkscreen labels clear and educational (component IDs, voltage warnings)
+- [x] Component heights verified for enclosure compatibility
+
+### Firmware Integration ✅
+- [x] Pin assignments finalized for Rev. B (all 4 motors support 4x encoders)
+- [x] Timer 3 conflict documented and resolved (LED_RED digital-only)
+- [x] Encoder ISR handlers planned (INT0-INT5 + PCINT0-PCINT1)
+- [x] UART protocol between Arduino and Raspberry Pi defined
+- [x] Voltage monitoring ADC channels allocated (A0-A2 for battery/rails)
 
 ---
 
@@ -648,35 +795,51 @@ pinMode(LIMIT_PIN, INPUT);  // No pullup, sensor drives HIGH/LOW
 
 ---
 
-## Notes for EasyEDA Design
+## 13. PCB Design Implementation (Rev. B - As Built)
 
-### Design Principles
-- **Modularity First:** PCB provides power and connectors; functionality comes from external modules
-- **Educational Value:** Clear silkscreen labels, logical component grouping, accessible test points
-- **Serviceability:** Standard connectors, easy access to critical components
+### Design Tool & Files
+- **Schematic/Layout Tool:** EasyEDA (online)
+- **Export Formats:** PDF schematics and Gerber files for fabrication
+- **File Location:** See `schematic/` and `layout/` folders for design files
 
-### PCB Layout Guidelines
-- Export schematic and PCB layout as PDF for version control
-- Keep component library up-to-date (verify part availability before finalizing)
-- Use **2-layer board** for cost-effectiveness (adequate for this design)
-- **Board dimensions:** 150mm x 100mm minimum (or larger) to accommodate display mounting holes
-- **Trace widths:**
-  - Battery input: ≥40mil (1mm)
-  - DC-DC converter output (5V, servo rail): ≥30mil (0.8mm)
-  - Motor power to H-bridge modules: ≥30mil
-  - Logic signals: ≥10mil (0.254mm)
-- Minimum via size: 0.3mm drill, 0.6mm pad
-- **Mounting holes:**
-  - Main chassis: 4x M3 or M4 (3.2mm or 4.2mm holes) in corners
-  - Display mounting: 4x M2.5 (2.7mm holes) for RPi 5 official 5-inch display
-  - Position display holes to avoid component interference and allow cable routing
-- **Thermal management for LM61460:**
-  - Large top copper pour connected to thermal pad
-  - Multiple thermal vias (0.3mm, array of 3x3 or more) to bottom layer
-  - Bottom copper pour as heatsink (1in² minimum per IC)
-  - Optional heatsink mounting area (mark on silkscreen)
-- Silkscreen font size: ≥40mil for readability
-- Keep high-current traces short and wide
-- Separate analog ground (ADC, battery monitor) from noisy digital ground (motors) where possible
-- **Module mounting:** Provide M3 standoff holes for heavy modules (H-bridge, PCA9685) if panel-mounted
-- **Display compatibility:** Leave clearance zone for display cable connector and ribbon cable routing
+### PCB Specifications (Final)
+- **Board Type:** 2-layer FR4 (cost-effective, adequate for design requirements)
+- **Board Dimensions:** ~150mm × 100mm (accommodates all components and mounting holes)
+- **Copper Weight:** 2oz (70µm) on power traces for thermal management
+- **Surface Finish:** HASL or ENIG (per fabricator standard)
+
+### Trace Width Implementation
+- **Battery input:** ≥40mil (1.0mm) - handles up to 20A burst current
+- **5V rail (buck output):** ≥30mil (0.8mm) - rated for 6A continuous
+- **Servo rail (buck output):** ≥30mil (0.8mm) - rated for 6A continuous
+- **Motor power to H-bridge:** ≥30mil - direct battery passthrough
+- **Logic signals:** ≥10mil (0.254mm) - standard digital I/O
+- **I2C, UART:** ≥10mil with controlled impedance where practical
+
+### Via Specifications
+- **Standard vias:** 0.3mm drill, 0.6mm pad
+- **Thermal vias (buck converters):** 0.3mm drill, array of 9+ vias per IC
+- **Via stitching:** Ground plane connected with vias every ~10mm
+
+### Mounting Hole Locations
+- **Main chassis:** 4x M3/M4 holes (3.2mm or 4.2mm diameter) in corners
+- **Display mounting (optional):** 4x M2.5 holes (2.7mm diameter) for RPi 5 official 5" display
+- **Standoff height:** 10-15mm recommended for component clearance
+
+### Thermal Management (LM61460 Buck Converters)
+- **Top side:** Large copper pour connected to IC thermal pad
+- **Thermal vias:** 3×3 array (minimum) under each IC, connecting to bottom ground plane
+- **Bottom side:** Solid copper pour (heatsink), minimum 1 square inch per IC
+- **Optional:** Stick-on heatsinks marked on silkscreen for high-load applications
+
+### Silkscreen & Component Marking
+- **Font size:** ≥40mil (1.0mm) for readability
+- **Component IDs:** All ICs, connectors, jumpers clearly labeled
+- **Voltage warnings:** Marked on servo rail potentiometer, Qwiic banks, limit switch jumper
+- **Polarity:** Battery connector, LED orientations, motor connectors
+- **Educational labels:** "Arduino I2C", "RPi I2C", "5V", "Servo Rail", etc.
+
+### Design Principles Applied
+- **Modularity:** PCB provides power distribution and clean interfaces; motor control via external modules
+- **Educational clarity:** Logical component grouping, accessible test points, clear labeling
+- **Serviceability:** Standard connectors (JST, Qwiic, screw terminals), replaceable fuse, socketed stepper drivers
