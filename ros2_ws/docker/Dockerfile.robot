@@ -49,9 +49,4 @@ COPY ros2_ws/docker/entrypoint.robot.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
 ENTRYPOINT ["/entrypoint.sh"]
-# The bridge node is the primary process. Docker manages its lifecycle:
-#   - restart: unless-stopped in docker-compose.rpi.yml restarts it on crash
-#   - exactly one bridge per container — never start it manually with ros2 run
-# To open a shell for the robot node or debugging, use:
-#   docker compose exec ros2_runtime bash
-CMD ["bash", "-lc", "source /ros2_ws/install/setup.bash && echo '[bridge] Starting bridge node...' && exec ros2 run bridge bridge"]
+CMD ["bash", "-lc", "echo '[entrypoint] Container ready. Start ROS nodes manually with ros2 run ...'; exec sleep infinity"]

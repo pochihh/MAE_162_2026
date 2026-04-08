@@ -67,13 +67,5 @@ if [[ ! -f /ros2_ws/install/setup.bash ]]; then
 fi
 
 source /ros2_ws/install/setup.bash
-
-echo ""
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo "  ROS2 shell — bridge node is managed by Docker"
-echo "  DO NOT run: ros2 run bridge bridge"
-echo "  Use this shell to run: ros2 run robot robot"
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo ""
 exec bash -i
 '

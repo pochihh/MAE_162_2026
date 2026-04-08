@@ -443,24 +443,19 @@ docker compose -f $COMPOSE up -d
 docker compose -f $COMPOSE logs -f ros2_runtime
 \end{minted}
 
-Wait until the log shows \texttt{[bridge] Starting bridge node...} followed by the bridge
-startup messages.
-The bridge node starts automatically --- you do not need to start it manually.
+Wait until the log shows that \texttt{colcon build} finished and the container is ready.
 
-\textbf{Important:} never run \texttt{ros2 run bridge bridge} manually inside the container.
-The container already runs exactly one bridge process.
-Starting a second one causes conflicting publishers and a non-functional UI.
+\subsubsection*{3.4 Launch the Bridge Node}
 
-\subsubsection*{3.4 Verify the Bridge is Running}
-
-Confirm only one bridge node is registered:
+Open a shell inside the running container and start the bridge:
 
 \begin{minted}{bash}
-docker compose -f $COMPOSE exec ros2_runtime bash -c \
-  "source /ros2_ws/install/setup.bash && ros2 node list"
+docker compose -f $COMPOSE exec ros2_runtime bash
+source /opt/ros/jazzy/setup.bash
+source /ros2_ws/install/setup.bash
+ros2 run bridge bridge
 \end{minted}
 
-You should see exactly \texttt{/bridge} (and no duplicates).
 The bridge node connects to the Arduino, starts the WebSocket server, and begins
 publishing ROS2 topics.
 
