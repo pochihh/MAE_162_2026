@@ -37,10 +37,13 @@ RIGHT_WHEEL_MOTOR = Motor.DC_M2
 RIGHT_WHEEL_DIR_INVERTED = True
 
 
-def configure_robot(robot: Robot) -> None:
-    """Apply the user unit plus robot-specific wheel mapping and odometry settings."""
+def configure_robot(robot: Robot) -> bool:
+    """Apply the user unit plus robot-specific wheel mapping and odometry settings.
+
+    Returns True if the firmware confirmed the params, False on timeout.
+    """
     robot.set_unit(POSITION_UNIT)
-    robot.set_odometry_parameters(
+    return robot.set_odometry_parameters(
         wheel_diameter=WHEEL_DIAMETER,
         wheel_base=WHEEL_BASE,
         initial_theta_deg=INITIAL_THETA_DEG,
@@ -69,10 +72,11 @@ def start_robot(robot: Robot) -> None:
 
 
 def run(robot: Robot) -> None:
-    configure_robot(robot)
-    
-
-    state = "INIT"
+    if not configure_robot(robot):
+        print("[FSM] ERROR - Firmware did not confirm odometry parameters. Check bridge connection.")
+        state = "ERROR"
+    else:
+        state = "INIT"
     drive_handle = None
     # FSM refresh rate control
     period = 1.0 / float(DEFAULT_FSM_HZ)
@@ -144,7 +148,13 @@ def run(robot: Robot) -> None:
             #print(f"Current Pose: ({current_x:.1f}, {current_y:.1f}, {current_theta_deg:.1f} deg)")
             #print(f"Current Pursuit Point: ({current_pursuit_x:.1f}, {current_pursuit_y:.1f})")            
             print("Finish your code in Task 2") # Delete this line after you finish Task 2
-            
+
+        elif state == "ERROR":
+            robot.set_led(LED.GREEN, 0)
+            robot.set_led(LED.ORANGE, 0)
+            print("[FSM] ERROR - halted. Restart the node after fixing the issue.")
+            time.sleep(1.0)
+
         # FSM refresh rate control
         next_tick += period
         sleep_s = next_tick - time.monotonic()

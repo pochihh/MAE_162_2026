@@ -192,6 +192,7 @@ class RobotApiTests(unittest.TestCase):
         self.robot.set_odometry_parameters(
             left_motor_dir_inverted=False,
             right_motor_dir_inverted=False,
+            timeout=0,
         )
         self.node.publishers["/dc_set_velocity"].published.clear()
         self.robot.set_velocity(100.0, 0.0)
@@ -202,6 +203,7 @@ class RobotApiTests(unittest.TestCase):
         self.robot.set_odometry_parameters(
             left_motor_dir_inverted=True,
             right_motor_dir_inverted=False,
+            timeout=0,
         )
         self.node.publishers["/dc_set_velocity"].published.clear()
         self.robot.set_velocity(100.0, 0.0)
@@ -227,6 +229,7 @@ class RobotApiTests(unittest.TestCase):
         self.robot.set_odometry_parameters(
             wheel_diameter=3.0,
             wheel_base=12.0,
+            timeout=0,
         )
 
         msg = self.node.publishers["/sys_odom_param_set"].published[-1]
@@ -281,7 +284,7 @@ class RobotApiTests(unittest.TestCase):
         )
 
     def test_odom_param_stale_firmware_echo_reasserts_user_config(self) -> None:
-        self.robot.set_odometry_parameters(left_motor_id=3, right_motor_id=4)
+        self.robot.set_odometry_parameters(left_motor_id=3, right_motor_id=4, timeout=0)
         self.node.publishers["/sys_odom_param_set"].published.clear()
 
         # Firmware echoes its stale defaults (M1/M2) — Python state must be
@@ -309,7 +312,7 @@ class RobotApiTests(unittest.TestCase):
         self.assertEqual(reassert[0].right_motor_number, 4)
 
     def test_odom_param_matching_firmware_echo_is_silent(self) -> None:
-        self.robot.set_odometry_parameters(left_motor_id=3, right_motor_id=4)
+        self.robot.set_odometry_parameters(left_motor_id=3, right_motor_id=4, timeout=0)
         self.node.publishers["/sys_odom_param_set"].published.clear()
 
         params = self.robot.get_odometry_parameters()
@@ -327,9 +330,50 @@ class RobotApiTests(unittest.TestCase):
         # No re-publish needed when echo already matches
         self.assertEqual(self.node.publishers["/sys_odom_param_set"].published, [])
 
+    def test_set_odometry_parameters_blocking_confirmed(self) -> None:
+        """Firmware echo matching our params signals confirmation."""
+        result_holder = []
+
+        def _call_set():
+            result_holder.append(
+                self.robot.set_odometry_parameters(
+                    left_motor_id=3, right_motor_id=4, timeout=2.0
+                )
+            )
+
+        t = threading.Thread(target=_call_set)
+        t.start()
+
+        # Give the thread time to publish and block on the event
+        t.join(timeout=0.1)
+        self.assertTrue(t.is_alive(), "set_odometry_parameters returned before firmware echo")
+
+        # Simulate firmware echoing back the correct params
+        params = self.robot.get_odometry_parameters()
+        self.robot._on_odom_param_rsp(types.SimpleNamespace(
+            wheel_diameter_mm=params["wheel_diameter_mm"],
+            wheel_base_mm=params["wheel_base_mm"],
+            initial_theta_deg=params["initial_theta_deg"],
+            left_motor_number=3,
+            left_motor_dir_inverted=params["left_motor_dir_inverted"],
+            right_motor_number=4,
+            right_motor_dir_inverted=params["right_motor_dir_inverted"],
+        ))
+
+        t.join(timeout=1.0)
+        self.assertFalse(t.is_alive(), "set_odometry_parameters did not unblock after echo")
+        self.assertTrue(result_holder[0])
+
+    def test_set_odometry_parameters_blocking_timeout(self) -> None:
+        """No firmware echo → returns False after timeout."""
+        result = self.robot.set_odometry_parameters(
+            left_motor_id=3, right_motor_id=4, timeout=0.05
+        )
+        self.assertFalse(result)
+
     def test_duplicate_odom_motor_pair_fails_fast(self) -> None:
         with self.assertRaisesRegex(ValueError, "must be different"):
-            self.robot.set_odometry_parameters(left_motor_id=2, right_motor_id=2)
+            self.robot.set_odometry_parameters(left_motor_id=2, right_motor_id=2, timeout=0)
 
     def test_request_pid_and_get_pid_cache(self) -> None:
         self.robot.request_pid(2, self.hardware_map.DCPidLoop.VELOCITY)

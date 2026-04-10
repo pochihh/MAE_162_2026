@@ -184,6 +184,7 @@ class Robot:
         self._left_wheel_dir_inverted = self.DEFAULT_LEFT_WHEEL_DIR_INVERTED
         self._right_wheel_dir_inverted = self.DEFAULT_RIGHT_WHEEL_DIR_INVERTED
         self._odom_user_configured = False  # True once user has called set_odometry_parameters
+        self._odom_confirm_event   = threading.Event()  # Set when firmware echoes matching params
         self._lock             = threading.Lock()
 
         # ── Cached firmware state ─────────────────────────────────────────────
@@ -384,7 +385,9 @@ class Robot:
                 )
             else:
                 snapshot = None
-        if snapshot is not None:
+        if in_sync:
+            self._odom_confirm_event.set()
+        else:
             self._publish_odom_params(snapshot)
 
     # =========================================================================
@@ -483,16 +486,32 @@ class Robot:
         left_motor_dir_inverted: bool | None = None,
         right_motor_id: int | None = None,
         right_motor_dir_inverted: bool | None = None,
-    ) -> None:
+        timeout: float = 1.0,
+    ) -> bool:
         """
-        Publish a full odometry-parameter snapshot to firmware in one call.
+        Publish a full odometry-parameter snapshot to firmware and wait for
+        confirmation.
 
         wheel_diameter and wheel_base are in the current user unit system.
         Use set_wheel_diameter_mm() / set_wheel_base_mm() when you need to
         work in explicit raw millimeters instead.
+
+        timeout — seconds to wait for firmware echo (default 1.0).
+                  Pass 0 to fire-and-forget without waiting.
+
+        Returns True if the firmware confirmed the params within timeout,
+        False on timeout (params may not have been applied on the firmware
+        side — the caller should treat this as a setup failure).
+
+        Firmware-side caveats:
+          - Some firmware builds only accept param changes in IDLE state; call
+            this before set_state(RUNNING).
+          - The firmware echoes params via SysOdomParamRsp; if the bridge or
+            firmware is not yet connected this method will time out even if
+            the set succeeded.
         """
         scale = self._unit.value
-        self._update_odometry_params(
+        return self._update_odometry_params(
             wheel_diameter_mm=None if wheel_diameter is None else float(wheel_diameter) * scale,
             wheel_base_mm=None if wheel_base is None else float(wheel_base) * scale,
             initial_theta_deg=initial_theta_deg,
@@ -500,6 +519,7 @@ class Robot:
             left_wheel_dir_inverted=left_motor_dir_inverted,
             right_wheel_motor=right_motor_id,
             right_wheel_dir_inverted=right_motor_dir_inverted,
+            timeout=timeout,
         )
 
     def request_odometry_parameters(self) -> None:
@@ -1705,7 +1725,8 @@ class Robot:
         left_wheel_dir_inverted: bool | None = None,
         right_wheel_motor: int | None = None,
         right_wheel_dir_inverted: bool | None = None,
-    ) -> None:
+        timeout: float = 0.0,
+    ) -> bool:
         with self._lock:
             next_wheel_diameter = self._wheel_diameter if wheel_diameter_mm is None else \
                 self._require_positive_float("wheel_diameter_mm", wheel_diameter_mm)
@@ -1746,7 +1767,23 @@ class Robot:
         )
 
         self._odom_user_configured = True
+        self._odom_confirm_event.clear()
         self._publish_odom_params(snapshot)
+
+        if timeout <= 0.0:
+            return True
+
+        # Request a firmware echo so we can verify the set landed.
+        # Sending SysOdomParamReq after SysOdomParamSet guarantees an ordered
+        # response that reflects the just-applied params (same bridge queue).
+        self.request_odometry_parameters()
+        confirmed = self._odom_confirm_event.wait(timeout=timeout)
+        if not confirmed:
+            self._node.get_logger().warning(
+                f"[robot] set_odometry_parameters: firmware did not confirm within "
+                f"{timeout}s — bridge may not be connected yet or firmware rejected params"
+            )
+        return confirmed
 
     def _publish_odom_params(
         self,
