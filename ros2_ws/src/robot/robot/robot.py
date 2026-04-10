@@ -346,20 +346,46 @@ class Robot:
             self._io_output_state = msg
 
     def _on_odom_param_rsp(self, msg: SysOdomParamRsp) -> None:
-        # Do not overwrite user-configured params with firmware echoes/defaults.
-        # Once set_odometry_parameters() has been called the Python-side config
-        # is authoritative; firmware may echo stale defaults on state transitions.
-        if self._odom_user_configured:
+        if not self._odom_user_configured:
+            # No user config yet — accept firmware state as the local snapshot.
+            self._apply_odom_param_snapshot(
+                float(msg.wheel_diameter_mm),
+                float(msg.wheel_base_mm),
+                float(msg.initial_theta_deg),
+                int(msg.left_motor_number),
+                bool(msg.left_motor_dir_inverted),
+                int(msg.right_motor_number),
+                bool(msg.right_motor_dir_inverted),
+            )
             return
-        self._apply_odom_param_snapshot(
-            float(msg.wheel_diameter_mm),
-            float(msg.wheel_base_mm),
-            float(msg.initial_theta_deg),
-            int(msg.left_motor_number),
-            bool(msg.left_motor_dir_inverted),
-            int(msg.right_motor_number),
-            bool(msg.right_motor_dir_inverted),
-        )
+
+        # User config is authoritative.  If the firmware echoed stale defaults
+        # (race: firmware sent SysOdomParamRsp before processing our
+        # SysOdomParamSet), re-assert our params so the firmware stays in sync
+        # for odometry.  If the echo already matches, do nothing.
+        with self._lock:
+            in_sync = (
+                int(msg.left_motor_number)       == self._left_wheel_motor       and
+                bool(msg.left_motor_dir_inverted) == self._left_wheel_dir_inverted and
+                int(msg.right_motor_number)       == self._right_wheel_motor      and
+                bool(msg.right_motor_dir_inverted) == self._right_wheel_dir_inverted and
+                abs(float(msg.wheel_diameter_mm) - self._wheel_diameter) < 1e-3   and
+                abs(float(msg.wheel_base_mm)     - self._wheel_base)     < 1e-3
+            )
+            if not in_sync:
+                snapshot = (
+                    self._wheel_diameter,
+                    self._wheel_base,
+                    self._initial_theta_deg,
+                    self._left_wheel_motor,
+                    self._left_wheel_dir_inverted,
+                    self._right_wheel_motor,
+                    self._right_wheel_dir_inverted,
+                )
+            else:
+                snapshot = None
+        if snapshot is not None:
+            self._publish_odom_params(snapshot)
 
     # =========================================================================
     # System

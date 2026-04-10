@@ -280,10 +280,12 @@ class RobotApiTests(unittest.TestCase):
             },
         )
 
-    def test_odom_param_response_ignored_after_user_configures(self) -> None:
+    def test_odom_param_stale_firmware_echo_reasserts_user_config(self) -> None:
         self.robot.set_odometry_parameters(left_motor_id=3, right_motor_id=4)
+        self.node.publishers["/sys_odom_param_set"].published.clear()
 
-        # Firmware echoes its own defaults (M1/M2) — must not overwrite user config.
+        # Firmware echoes its stale defaults (M1/M2) — Python state must be
+        # preserved AND user params must be re-published to resync firmware.
         firmware_echo = types.SimpleNamespace(
             wheel_diameter_mm=70.0,
             wheel_base_mm=300.0,
@@ -295,9 +297,35 @@ class RobotApiTests(unittest.TestCase):
         )
         self.robot._on_odom_param_rsp(firmware_echo)
 
+        # Python state unchanged
         params = self.robot.get_odometry_parameters()
         self.assertEqual(params["left_motor_number"], 3)
         self.assertEqual(params["right_motor_number"], 4)
+
+        # Firmware was re-sent our config
+        reassert = self.node.publishers["/sys_odom_param_set"].published
+        self.assertEqual(len(reassert), 1)
+        self.assertEqual(reassert[0].left_motor_number, 3)
+        self.assertEqual(reassert[0].right_motor_number, 4)
+
+    def test_odom_param_matching_firmware_echo_is_silent(self) -> None:
+        self.robot.set_odometry_parameters(left_motor_id=3, right_motor_id=4)
+        self.node.publishers["/sys_odom_param_set"].published.clear()
+
+        params = self.robot.get_odometry_parameters()
+        matching_echo = types.SimpleNamespace(
+            wheel_diameter_mm=params["wheel_diameter_mm"],
+            wheel_base_mm=params["wheel_base_mm"],
+            initial_theta_deg=params["initial_theta_deg"],
+            left_motor_number=3,
+            left_motor_dir_inverted=params["left_motor_dir_inverted"],
+            right_motor_number=4,
+            right_motor_dir_inverted=params["right_motor_dir_inverted"],
+        )
+        self.robot._on_odom_param_rsp(matching_echo)
+
+        # No re-publish needed when echo already matches
+        self.assertEqual(self.node.publishers["/sys_odom_param_set"].published, [])
 
     def test_duplicate_odom_motor_pair_fails_fast(self) -> None:
         with self.assertRaisesRegex(ValueError, "must be different"):
