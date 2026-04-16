@@ -283,7 +283,7 @@ issuing a motion command.
 
 ### Base Velocity (Direct)
 
-#### `set_velocity(linear: float, angular_rad_s: float) → None`
+#### `set_velocity(linear: float, angular_deg_s: float) → None`
 Sends a body-frame velocity command. Publishes two `/dc_set_velocity` messages
 (one per wheel) computed from the differential drive mixing:
 
@@ -293,8 +293,7 @@ right_mm_s = linear_mm_s + angular_rad_s × wheel_base_mm / 2
 ```
 
 Direction inversion flags are applied before publishing. `linear` is in the
-current unit/s. `angular_rad_s` is rad/s (CCW positive) — same unit as
-`PurePursuitPlanner.compute_velocity()` output.
+current unit/s. `angular_deg_s` is degrees/s (CCW positive).
 
 #### `stop() → None`
 Publishes zero velocity to both drive motors. Does not ESTOP the firmware.

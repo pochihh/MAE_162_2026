@@ -95,7 +95,7 @@ FSM/path-planner threads read it.
 
 | Method | Blocking | Notes |
 |---|---|---|
-| `set_velocity(linear, angular_rad_s)` | no | body-frame: linear in user-units/s, angular in rad/s (matches PurePursuitPlanner output); robot API uses the current odom wheel mapping and inversion flags |
+| `set_velocity(linear, angular_deg_s)` | no | body-frame: linear in user-units/s, angular in degrees/s; robot API uses the current odom wheel mapping and inversion flags |
 | `set_left_wheel(motor_id)` / `set_right_wheel(motor_id)` | no | compatibility aliases for `set_odom_left_motor()` / `set_odom_right_motor()` |
 | `set_motor_velocity(motor_id, velocity)` | no | per-motor; velocity in user-units/s → ticks/s |
 | `stop()` | no | zero velocity on both drive motors; does NOT ESTOP |

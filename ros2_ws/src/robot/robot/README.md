@@ -170,7 +170,7 @@ robot.set_unit(Unit.INCH)  # all length/velocity in inches
 - Length and velocity inputs follow the active unit unless the method name
   ends in `_mm` (those are always raw millimeters).
 - Heading angles are always **degrees** in the public API.
-- `angular_rad_s` in `set_velocity()` and `max_angular_rad_s` in path-following calls are **rad/s** — consistent with planner output.
+- `max_angular_rad_s` in path-following calls is **rad/s** — the one exception.
 
 ---
 

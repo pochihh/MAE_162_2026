@@ -630,13 +630,14 @@ class Robot:
     # Differential drive — velocity commands
     # =========================================================================
 
-    def set_velocity(self, linear: float, angular_rad_s: float) -> None:
+    def set_velocity(self, linear: float, angular_deg_s: float) -> None:
         """
         Body-frame velocity command.
           linear        — forward speed in user units/s
-          angular_rad_s — rotation rate in rad/s (CCW positive)
+          angular_deg_s — rotation rate in degrees/s (CCW positive)
         """
-        linear_mm = linear * self._unit.value
+        linear_mm    = linear * self._unit.value
+        angular_rad_s = math.radians(angular_deg_s)
         self._send_body_velocity_mm(linear_mm, angular_rad_s)
 
     def set_motor_velocity(self, motor_id: int, velocity: float) -> None:
