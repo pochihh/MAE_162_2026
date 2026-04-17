@@ -208,14 +208,15 @@ def fit_soft_iron_calibration(samples: Sequence[Tuple[float, float, float]]) -> 
 
 class MagCalibrationController:
     MIN_SAMPLES = 150
-    MIN_DURATION_S = 6.0
+    MIN_DURATION_S = 12.0
     MAX_DURATION_S = 30.0
     MIN_AXIS_SPAN_UT = 8.0
     MIN_AXIS_RATIO = 0.18
     SPAN_GROWTH_EPS_UT = 0.5
+    MIN_STABLE_DURATION_S = 5.0  # span must stop growing for this long before early accept
     FIT_RETRY_INTERVAL_S = 0.5
-    MAX_STD_RATIO = 0.75
-    TIMEOUT_STD_RATIO = 0.90
+    MAX_STD_RATIO = 0.55          # tighter: early accept only with high-confidence fit
+    TIMEOUT_STD_RATIO = 0.75      # tighter: fall back to hard-iron if full fit is marginal
     TIMEOUT_MIN_SAMPLES = 100
     TIMEOUT_MIN_AXIS_SPAN_UT = 4.0
     MAX_SAMPLES = 4096
@@ -245,6 +246,7 @@ class MagCalibrationController:
         self._min = [math.inf, math.inf, math.inf]
         self._max = [-math.inf, -math.inf, -math.inf]
         self._last_fit_attempt_time = 0.0
+        self._last_span_growth_time = 0.0
         self._best_result: Optional[MagCalibrationResult] = None
         self._best_std_ratio = math.inf
         self._last_std_ratio = math.inf
@@ -299,6 +301,10 @@ class MagCalibrationController:
         elapsed = now - self._start_time
         spans = [self._max[idx] - self._min[idx] for idx in range(3)]
 
+        for idx in range(3):
+            if spans[idx] > prev_spans[idx] + self.SPAN_GROWTH_EPS_UT:
+                self._last_span_growth_time = now
+
         if elapsed >= self.MAX_DURATION_S:
             result = fit_soft_iron_calibration(self._samples)
             if result is not None and result.mean_norm > 1e-6:
@@ -336,7 +342,11 @@ class MagCalibrationController:
             if std_ratio < self._best_std_ratio:
                 self._best_std_ratio = std_ratio
                 self._best_result = result
-            if std_ratio <= self.MAX_STD_RATIO:
+            spans_stable = (
+                self._last_span_growth_time > 0 and
+                now - self._last_span_growth_time >= self.MIN_STABLE_DURATION_S
+            )
+            if std_ratio <= self.MAX_STD_RATIO and spans_stable:
                 self._apply_result(result)
                 return
         else:
