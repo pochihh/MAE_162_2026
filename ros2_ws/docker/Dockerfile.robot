@@ -45,6 +45,7 @@ RUN pip3 install --no-cache-dir --break-system-packages \
 RUN apt-get update && apt-get install -y --no-install-recommends \
         python3-libcamera \
         libcamera-tools \
+        libcap-dev \
     && rm -rf /var/lib/apt/lists/*
 RUN pip3 install --no-cache-dir --break-system-packages picamera2
 
