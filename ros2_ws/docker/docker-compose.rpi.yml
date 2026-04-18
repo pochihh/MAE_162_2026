@@ -27,6 +27,10 @@ services:
     devices:
       - /dev/ttyAMA0:/dev/ttyAMA0
       - /dev/rplidar:/dev/rplidar
+      # Pi Camera — libcamera uses media/video nodes (Pi 5 exposes media0+media1)
+      - /dev/media0:/dev/media0
+      - /dev/media1:/dev/media1
+      - /dev/video0:/dev/video0
     
     group_add:
       - dialout
@@ -44,6 +48,8 @@ services:
       # Host $HOME mounted so nodes can write output files (plots, logs) directly
       # to the host filesystem. Inside the container it appears as /host_home.
       - ${HOME}:/host_home
+      # udev required for libcamera device enumeration inside the container
+      - /run/udev:/run/udev:ro
 
     environment:
       # Restrict DDS discovery to loopback — prevents ROS2 nodes from bleeding

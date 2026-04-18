@@ -39,6 +39,12 @@ RUN pip3 install --no-cache-dir --break-system-packages \
     "PyJWT>=2.8.0,<3.0" \
     "passlib[bcrypt]>=1.7.4"
 
+# ── Pi Camera (libcamera + picamera2) ────────────────────────────────────────
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        python3-picamera2 \
+        libcamera-tools \
+    && rm -rf /var/lib/apt/lists/*
+
 # ── Initialize rosdep ─────────────────────────────────────────────────────────
 RUN rosdep init || true && rosdep update
 
