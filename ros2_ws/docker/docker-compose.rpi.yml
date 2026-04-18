@@ -31,6 +31,9 @@ services:
       - /dev/media0:/dev/media0
       - /dev/media1:/dev/media1
       - /dev/video0:/dev/video0
+
+    # Required for libcamera to enumerate and access camera hardware
+    privileged: true
     
     group_add:
       - dialout
