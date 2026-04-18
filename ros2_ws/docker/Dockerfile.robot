@@ -21,6 +21,8 @@ ENV DEBIAN_FRONTEND=noninteractive
 ENV ROS_DISTRO=jazzy
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
+# Expose apt-installed Python packages (e.g. python3-libcamera) to pip-managed Python
+ENV PYTHONPATH=/usr/lib/python3/dist-packages:${PYTHONPATH}
 
 # ── Core system packages ──────────────────────────────────────────────────────
 RUN apt-get update && apt-get install -y --no-install-recommends \
