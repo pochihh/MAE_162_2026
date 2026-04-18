@@ -40,12 +40,11 @@ RUN pip3 install --no-cache-dir --break-system-packages \
     "passlib[bcrypt]>=1.7.4"
 
 # ── Pi Camera (libcamera + picamera2) ────────────────────────────────────────
-# python3-picamera2 is RPi OS only; install libcamera bindings from Ubuntu Noble
-# then picamera2 via pip. rpicam-apps provides camera CLI tools (rpicam-hello etc).
+# python3-picamera2/python3-kms++/rpicam-apps are RPi OS only, not in Ubuntu Noble.
+# python3-libcamera and libcamera-tools are available; picamera2 installed via pip.
 RUN apt-get update && apt-get install -y --no-install-recommends \
         python3-libcamera \
-        python3-kms++ \
-        rpicam-apps \
+        libcamera-tools \
     && rm -rf /var/lib/apt/lists/*
 RUN pip3 install --no-cache-dir --break-system-packages picamera2
 
