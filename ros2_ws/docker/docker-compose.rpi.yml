@@ -30,7 +30,16 @@ services:
       # Pi Camera — libcamera uses media/video nodes (Pi 5 exposes media0+media1)
       - /dev/media0:/dev/media0
       - /dev/media1:/dev/media1
+      - /dev/media2:/dev/media2
+      - /dev/media3:/dev/media3
       - /dev/video0:/dev/video0
+      - /dev/video1:/dev/video1
+      - /dev/video2:/dev/video2
+      - /dev/video3:/dev/video3
+      - /dev/video4:/dev/video4
+      - /dev/video5:/dev/video5
+      - /dev/video6:/dev/video6
+      - /dev/video7:/dev/video7
 
     # Required for libcamera to enumerate and access camera hardware
     privileged: true
@@ -64,7 +73,9 @@ services:
       - NUEVO_USERS_FILE=/data/users.json
       - NUEVO_SERIAL_PORT=/dev/ttyAMA0
       - NUEVO_SERIAL_BAUD=200000
-
+      # Point libcamera to Pi5-compatible IPA modules built into the image
+      # via ros-jazzy-libcamera (ipa_rpi_pisp.so for Pi5 PISP pipeline).
+      - LIBCAMERA_IPA_MODULE_PATH=/usr/local/lib/aarch64-linux-gnu/libcamera
 
     restart: unless-stopped
 
