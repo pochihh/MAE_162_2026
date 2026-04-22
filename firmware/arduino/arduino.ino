@@ -700,6 +700,32 @@ void taskUserIO() {
 }
 
 // ============================================================================
+// SOFT TASK — taskI2CRetry (1 Hz, lowest priority, millis-based)
+// ============================================================================
+
+/**
+ * @brief Periodic I2C device retry task
+ *
+ * Attempts to reinitialize optional I2C devices (e.g., PCA9685 servo driver)
+ * that may have been absent at startup but are plugged in during runtime.
+ *
+ * Runs at very low priority (priority=7, the lowest) and low frequency (1 Hz)
+ * to ensure it never blocks motor control, sensor reads, or other critical tasks.
+ * If a device is already initialized, this task is a no-op and costs minimal time.
+ */
+void taskI2CRetry() {
+  if (!ServoController::isInitialized()) {
+    ServoController::init();
+    if (ServoController::isInitialized()) {
+      ServoController::enable();
+#ifdef DEBUG_SERVO
+      DEBUG_SERIAL.println(F("[I2C Retry] PCA9685 servo driver initialized"));
+#endif
+    }
+  }
+}
+
+// ============================================================================
 // ENCODER ISR TRAMPOLINES
 // ============================================================================
 
@@ -925,6 +951,13 @@ void setup() {
 #else
   DEBUG_SERIAL.println(F("  - Status Reporter: disabled"));
 #endif
+
+  taskId = Scheduler::registerTask(taskI2CRetry, 1000, 7);
+  if (taskId >= 0) {
+    DEBUG_SERIAL.print(F("  - I2C Retry: Task #"));
+    DEBUG_SERIAL.print(taskId);
+    DEBUG_SERIAL.println(F(" @ 1000ms (1Hz, lowest priority)"));
+  }
 
   // 7. Move into IDLE before enabling hard real-time services.
   if (SystemManager::triggerBootCompleted()) {
