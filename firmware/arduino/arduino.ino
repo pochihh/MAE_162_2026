@@ -934,9 +934,10 @@ void setup() {
   }
 
   // 8. Start hard real-time timer services last.
-  DEBUG_SERIAL.println(F("[Setup] Starting hard real-time ISRs (Timer1 + Timer3; Timer4 PWM only)..."));
+  DEBUG_SERIAL.println(F("[Setup] Starting hard real-time ISRs (Timer1 + Timer3; Timer2/Timer4 PWM)..."));
   noInterrupts();
   ISRScheduler::configureTimer1DcSlotISR();
+  ISRScheduler::configureTimer2PwmOnly();
   ISRScheduler::configureTimer4PwmOnly();
   interrupts();
   UserIO::syncOutputs();

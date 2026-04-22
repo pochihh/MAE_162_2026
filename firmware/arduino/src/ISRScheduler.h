@@ -60,13 +60,15 @@ public:
                                           void (*m2b)(void));
     static void attachDcEncoderPcints();
     static void configureTimer1DcSlotISR();
+    static void configureTimer2PwmOnly();
     static void configureTimer4PwmOnly();
     /**
-     * @brief Configure Timer1 for the short round-robin DC slot and Timer4 for PWM only.
+     * @brief Configure Timer1, Timer2, and Timer4 for motor PWM.
      *
+     * Timer2 (8-bit) drives M3_EN (pin 9) and M4_EN (pin 10) at ~7.8 kHz.
+     * Timer4 (16-bit) drives M1_EN (pin 6) and M2_EN (pin 7) at 10 kHz.
      * Timer3 is configured separately by StepperManager::init() and uses its
-     * overflow vector from arduino.ino. Timer4 overflow interrupts stay
-     * disabled in the mixed-control profile.
+     * overflow vector from arduino.ino.
      *
      * Must be called LAST in setup().
      */

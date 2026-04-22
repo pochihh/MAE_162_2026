@@ -69,6 +69,40 @@ void ISRScheduler::configureTimer1DcSlotISR() {
     TIMSK1 = (1 << TOIE1);   // Timer1 round-robin ISR + PWM hardware
 }
 
+void ISRScheduler::configureTimer2PwmOnly() {
+    // ========================================================================
+    // Timer2: Fast PWM mode 3 — 8-bit fast PWM for M3/M4 motor PWM
+    // ========================================================================
+    //
+    //   f_cpu     = 16 MHz
+    //   prescaler = 8   →   f_timer = 2 MHz
+    //   8-bit TOP = 255  →  f_pwm = 2 MHz / 256 ≈ 7.8 kHz
+    //
+    //   OC2A (pin 10) → M4_EN, OC2B (pin 9) → M3_EN
+    //
+    //   Fast PWM mode 3: WGM22=0, WGM21=1, WGM20=1
+    //   Non-inverting: COM2A1=1, COM2A0=0, COM2B1=1, COM2B0=0
+    //   Clock select: CS22=0, CS21=1, CS20=0 (prescaler 8)
+    // ========================================================================
+
+    // Stop timer and disable interrupts during configuration
+    TCCR2B = 0;
+    TCNT2 = 0;
+    OCR2A = 0;
+    OCR2B = 0;
+    TIMSK2 = 0;
+
+    // Set Fast PWM mode 3 (WGM = 3) with non-inverting OC outputs
+    //   TCCR2A bits: [COM2A1 COM2A0 COM2B1 COM2B0 - - WGM21 WGM20]
+    //   Set: COM2A1=1, COM2B1=1, WGM21=1, WGM20=1 (all others = 0)
+    TCCR2A = (1 << COM2A1) | (1 << COM2B1) | (1 << WGM21) | (1 << WGM20);
+
+    // Start timer with prescaler 8
+    //   TCCR2B bits: [FOC2A FOC2B - - WGM22 CS22 CS21 CS20]
+    //   Set: CS21=1 for prescaler 8 (all others = 0)
+    TCCR2B = (1 << CS21);
+}
+
 void ISRScheduler::configureTimer4PwmOnly() {
     // ========================================================================
     // Timer4: Fast PWM mode 14 — 10 kHz carrier for motor PWM only
@@ -105,6 +139,7 @@ void ISRScheduler::configureTimer4PwmOnly() {
 void ISRScheduler::init() {
     noInterrupts();
     configureTimer1DcSlotISR();
+    configureTimer2PwmOnly();
     configureTimer4PwmOnly();
 
     interrupts();
