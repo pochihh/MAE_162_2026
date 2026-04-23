@@ -1,0 +1,55 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Dockerfile.jetson — Global GPS stack for the Jetson Orin NX / Orin Nano
+#
+# Target:  Jetson Orin NX / Orin Nano running JetPack 6.x (host: Ubuntu 22.04, arm64)
+#          The container itself uses Ubuntu 24.04 (Noble) via ros:jazzy-ros-base.
+# ROS2:    Jazzy Jalisco
+#
+# Note: librealsense2 and realsense2_camera are packaged inside the ROS2 Jazzy
+# apt repo as ros-jazzy-librealsense2 and ros-jazzy-realsense2-camera.
+# No separate Intel apt repo is needed.
+#
+# Build context: Project-NUEVO/ repository root
+#   docker compose -f ros2_ws/docker/docker-compose.jetson.yml build
+# ─────────────────────────────────────────────────────────────────────────────
+
+FROM ros:jazzy-ros-base
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV ROS_DISTRO=jazzy
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+
+# ── Core system packages ──────────────────────────────────────────────────────
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        python3-pip \
+        python3-colcon-common-extensions \
+        python3-rosdep \
+        # OpenCV with ArUco support
+        python3-opencv \
+        # cv_bridge and message_filters
+        ros-jazzy-cv-bridge \
+        ros-jazzy-message-filters \
+        # Intel RealSense SDK — bundled in the ROS2 Jazzy apt repo
+        ros-jazzy-librealsense2 \
+        # RealSense ROS2 camera driver
+        ros-jazzy-realsense2-camera \
+        ros-jazzy-realsense2-description \
+    && rm -rf /var/lib/apt/lists/*
+
+# ── Python runtime deps ───────────────────────────────────────────────────────
+RUN pip3 install --no-cache-dir --break-system-packages \
+    "numpy>=1.24,<2.0"
+
+# ── Initialize rosdep ─────────────────────────────────────────────────────────
+RUN rosdep init || true && rosdep update
+
+WORKDIR /ros2_ws
+RUN mkdir -p src
+
+# ── Entrypoint ────────────────────────────────────────────────────────────────
+COPY ros2_ws/docker/entrypoint.jetson.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
+ENTRYPOINT ["/entrypoint.sh"]
+CMD ["bash", "-lc", "echo '[entrypoint] Container ready. Run: ros2 launch global_gps global_gps.launch.py'; exec sleep infinity"]

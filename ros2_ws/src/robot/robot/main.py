@@ -26,6 +26,7 @@ import math
 # Robot build configuration
 # ---------------------------------------------------------------------------
 
+TAG_ID = 11 # set aruco tag ID 11 
 POSITION_UNIT = Unit.MM
 WHEEL_DIAMETER = 74.0
 WHEEL_BASE = 333.0
@@ -37,13 +38,10 @@ RIGHT_WHEEL_MOTOR = Motor.DC_M2
 RIGHT_WHEEL_DIR_INVERTED = True
 
 
-def configure_robot(robot: Robot) -> bool:
-    """Apply the user unit plus robot-specific wheel mapping and odometry settings.
-
-    Returns True if the firmware confirmed the params, False on timeout.
-    """
+def configure_robot(robot: Robot) -> None:
+    """Apply the user unit plus robot-specific wheel mapping and odometry settings."""
     robot.set_unit(POSITION_UNIT)
-    return robot.set_odometry_parameters(
+    robot.set_odometry_parameters(
         wheel_diameter=WHEEL_DIAMETER,
         wheel_base=WHEEL_BASE,
         initial_theta_deg=INITIAL_THETA_DEG,
@@ -52,6 +50,7 @@ def configure_robot(robot: Robot) -> bool:
         right_motor_id=RIGHT_WHEEL_MOTOR,
         right_motor_dir_inverted=RIGHT_WHEEL_DIR_INVERTED,
     )
+    robot.set_tracked_tag_id(TAG_ID) # set aruco tag ID as the tracked tag for localization
 
 
 def show_idle_leds(robot: Robot) -> None:
@@ -72,11 +71,10 @@ def start_robot(robot: Robot) -> None:
 
 
 def run(robot: Robot) -> None:
-    if not configure_robot(robot):
-        print("[FSM] ERROR - Firmware did not confirm odometry parameters. Check bridge connection.")
-        state = "ERROR"
-    else:
-        state = "INIT"
+    configure_robot(robot)
+    
+
+    state = "INIT"
     drive_handle = None
     # FSM refresh rate control
     period = 1.0 / float(DEFAULT_FSM_HZ)
@@ -88,20 +86,20 @@ def run(robot: Robot) -> None:
             print("[FSM] INIT (odometry reset)")
             path_control_points = [ #Define your path control points here (x, y) in mm
                 (0.0, 0.0), # 1st point
-                (0.0, 500.0), # 2nd point
-                (500.0, 500.0), # 3rd point
-                (500.0, 0.0), # 4th point
-                (0.0, 0.0), # 5th point
+                (0.0, 3.6576e3), # 2nd point
+                #(500.0, 500.0), # 3rd point
+                #(500.0, 0.0), # 4th point
+                #(0.0, 0.0), # 5th point
             ]    
             path1 = path_control_points
             #path1 = densify_polyline(path_control_points, spacing=20.0)
             remaining_path = path1.copy() 
             print("Path is ready, Entering IDLE state.")
+            print("[FSM] IDLE - Press BTN_1 to enter MOVING state.")
             state = "IDLE"
 
         elif state == "IDLE":
             show_idle_leds(robot)
-            print("[FSM] IDLE - Press BTN_1 to enter MOVING state.")
             if robot.get_button(Button.BTN_1):
                 LOOKAHEAD_DIST = 100.0 # Lookahead distance in mm (adjust as needed)
                 planner1 = PurePursuitPlanner(
@@ -112,49 +110,56 @@ def run(robot: Robot) -> None:
                 print("Pure Pursuit Planner is initialized. Start Moving!")
                 print("[FSM] MOVING")
                 state = "MOVING"
+            if robot.get_button(Button.BTN_2):
+                print("BTN_2 pressed. Stopping robot and saving trajectory.")
+                robot.shutdown()
 
         elif state == "MOVING":
             show_moving_leds(robot)
-            """Start your code here"""
-            # Step 1: Get current pose, including current coordinates and heading angle in degrees 
-            # using robot.get_pose() function. Store the values in current_x, current_y, and current_theta_deg variables. 
+            # Step 1: Get current pose, including current coordinates and heading angle in degrees
+            # using robot.get_pose() function. Store the values in current_x, current_y, and current_theta_deg variables.
+            current_x, current_y, current_theta_deg = robot.get_pose()
 
-            # Step 2: Convert current_theta_deg to radians and store it in current_theta_rad variable.  
+            # Step 2: Convert current_theta_deg to radians and store it in current_theta_rad variable.
+            current_theta_rad = math.radians(current_theta_deg)
 
-            # Step 3: Use the _advance_remaining_path() function to update the remaining_path variable 
+            # Step 3: Use the _advance_remaining_path() function to update the remaining_path variable
             # by advancing it based on the current position (current_x, current_y) and an advance radius(20.0) mm.
-            # This will take out the waypoints that are already passed (within 20mm of the current position), 
+            # This will take out the waypoints that are already passed (within 20mm of the current position),
             # effectively "advancing" the path as the robot moves.
+            remaining_path = robot._advance_remaining_path(remaining_path, current_x, current_y, advance_radius_mm=LOOKAHEAD_DIST)
 
-            # Step 4: Use the _lookahead_point() function to calculate the current pursuit point 
+            # Step 4: Use the _lookahead_point() function to calculate the current pursuit point
             # in your path, defined as (current_pursuit_x, current_pursuit_y)
+            current_pursuit_x, current_pursuit_y = planner1._lookahead_point(
+                current_x,
+                current_y,
+                waypoints=remaining_path,
+            )
 
-            # Step 5: Use the compute_velocity() function of the PurePursuitPlanner 
+            # Step 5: Use the compute_velocity() function of the PurePursuitPlanner
             # to calculate the linear and angular velocity commands
+            linear_velocity_cmd, angular_velocity_cmd_rad_s = planner1.compute_velocity(
+                pose=(current_x, current_y, current_theta_rad),
+                waypoints=remaining_path,
+                max_linear=80.0, # Max linear velocity in mm/s (adjust as needed
+            )
 
             # Step 6: Use the robot.set_velocity() function to send the velocity commands to the robot.
+            robot.set_velocity(
+                linear_velocity_cmd,
+                math.degrees(angular_velocity_cmd_rad_s),
+            )
 
-            # Step 7: Check if the current target point is reached using the 
+            # Step 7: Check if the current target point is reached using the
             # CurrentTargetReached() function of the PurePursuitPlanner.
             # Just uncomment the following lines to enable the print statements.
-            """if planner1.CurrentTargetReached(current_pursuit_x, current_pursuit_y, current_x, current_y): 
+            if planner1.CurrentTargetReached(current_pursuit_x, current_pursuit_y, current_x, current_y):
                 print("MOVING: Target reached! Stopping.")
                 robot.stop()
                 print("[FSM] IDLE")
-                state = "IDLE"       """        
+                state = "IDLE"
             
-            # Step 8: Print the current pose and current pursuit point to the console for debugging purposes.
-            # Just uncomment the following lines to enable the print statements.
-            #print(f"Current Pose: ({current_x:.1f}, {current_y:.1f}, {current_theta_deg:.1f} deg)")
-            #print(f"Current Pursuit Point: ({current_pursuit_x:.1f}, {current_pursuit_y:.1f})")            
-            print("Finish your code in Task 2") # Delete this line after you finish Task 2
-
-        elif state == "ERROR":
-            robot.set_led(LED.GREEN, 0)
-            robot.set_led(LED.ORANGE, 0)
-            print("[FSM] ERROR - halted. Restart the node after fixing the issue.")
-            time.sleep(1.0)
-
         # FSM refresh rate control
         next_tick += period
         sleep_s = next_tick - time.monotonic()

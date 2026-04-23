@@ -10,6 +10,12 @@ def generate_launch_description():
                 executable="robot",
                 name="robot",
                 output="screen",
-            )
+            ),
+            Node(
+                package="sensors",
+                executable="robot_gps",
+                name="robot_gps",
+                output="screen",
+            ),
         ]
     )

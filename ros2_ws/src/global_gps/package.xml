@@ -1,0 +1,29 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>global_gps</name>
+  <version>0.1.0</version>
+  <description>
+    Field-level localizer running on the Jetson Nano.
+    Detects ArUco markers on a RealSense camera, fits a ground plane from
+    four fixed corner anchors, and publishes world-frame 2-D poses for all
+    detected rover tags as a TagDetectionArray on /global_gps/tag_detections.
+  </description>
+  <maintainer email="pc.toby.chen@gmail.com">Toby Chen</maintainer>
+  <license>MIT</license>
+
+  <depend>rclpy</depend>
+  <depend>sensor_msgs</depend>
+  <depend>std_msgs</depend>
+  <depend>cv_bridge</depend>
+  <depend>bridge_interfaces</depend>
+
+  <test_depend>ament_copyright</test_depend>
+  <test_depend>ament_flake8</test_depend>
+  <test_depend>ament_pep257</test_depend>
+  <test_depend>python3-pytest</test_depend>
+
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
+</package>

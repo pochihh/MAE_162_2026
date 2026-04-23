@@ -28,6 +28,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         python3-colcon-common-extensions \
         python3-rosdep \
     && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y python3-matplotlib
 
 # ── Python runtime deps for the shared bridge runtime ────────────────────────
 RUN pip3 install --no-cache-dir --break-system-packages \

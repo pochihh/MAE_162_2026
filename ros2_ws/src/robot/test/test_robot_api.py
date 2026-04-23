@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib
+import math
 import sys
 import threading
 import types
@@ -120,6 +121,7 @@ def _install_fake_robot_dependencies() -> None:
         "SystemInfo",
         "SystemPower",
         "SystemState",
+        "TagDetectionArray",
     ]:
         setattr(bridge_interfaces_msg, name, make_message(name))
 
@@ -574,7 +576,10 @@ class RobotApiTests(unittest.TestCase):
             )
 
     def test_move_forward_uses_current_heading(self) -> None:
-        self.robot._pose = (10.0, 20.0, 0.0)
+        # _move_along_heading reads from _get_pose_mm() (fused state), not _pose.
+        self.robot._fused_x_mm  = 10.0
+        self.robot._fused_y_mm  = 20.0
+        self.robot._fused_theta = 0.0
 
         with mock.patch.object(self.robot, "move_to", return_value="ok") as move_to:
             result = self.robot.move_forward(100.0, 50.0, tolerance=10.0, blocking=False)
@@ -590,7 +595,10 @@ class RobotApiTests(unittest.TestCase):
         )
 
     def test_move_backward_uses_current_heading(self) -> None:
-        self.robot._pose = (10.0, 20.0, self.robot_module.math.pi / 2.0)
+        # _move_along_heading reads from _get_pose_mm() (fused state), not _pose.
+        self.robot._fused_x_mm  = 10.0
+        self.robot._fused_y_mm  = 20.0
+        self.robot._fused_theta = self.robot_module.math.pi / 2.0
 
         with mock.patch.object(self.robot, "move_to", return_value="ok") as move_to:
             result = self.robot.move_backward(100.0, 50.0, tolerance=10.0, blocking=True)
@@ -724,6 +732,59 @@ class RobotApiTests(unittest.TestCase):
         self.assertTrue(self.robot._wait_dc_not_homing(4, 0.01))
         with mock.patch.object(self.robot_module.time, "sleep", lambda *_args, **_kwargs: None):
             self.assertTrue(self.robot._wait_stepper_idle(4, 0.01))
+
+    def test_get_fused_orientation_uses_kinematics_before_mag_calibration(self) -> None:
+        imu = self.robot_module.SensorImu()
+        imu.mag_calibrated = False
+        imu.mag_x = 1
+        imu.mag_y = 0
+        self.robot._on_imu(imu)
+
+        kin = self.robot_module.SensorKinematics()
+        kin.x = 0.0
+        kin.y = 0.0
+        kin.theta = 0.5
+        kin.vx = 0.0
+        kin.vy = 0.0
+        kin.v_theta = 0.0
+        self.robot._on_kinematics(kin)
+
+        self.assertAlmostEqual(self.robot.get_fused_orientation(), math.degrees(0.5), places=6)
+
+    def test_get_fused_orientation_blends_mag_heading_when_calibrated(self) -> None:
+        self.robot.set_orientation_fusion_alpha(0.2)
+
+        # _on_imu now extracts heading from the AHRS quaternion, not raw mag.
+        # Build a flat-robot quaternion for yaw = π/2 (north):
+        #   qw = cos(π/4), qz = sin(π/4), qx = qy = 0
+        imu = self.robot_module.SensorImu()
+        imu.mag_calibrated = True
+        imu.mag_x = 0
+        imu.mag_y = 1
+        imu.quat_w = math.cos(math.pi / 4)
+        imu.quat_x = 0.0
+        imu.quat_y = 0.0
+        imu.quat_z = math.sin(math.pi / 4)
+        self.robot._on_imu(imu)
+
+        kin = self.robot_module.SensorKinematics()
+        kin.x = 0.0
+        kin.y = 0.0
+        kin.theta = 0.0
+        kin.vx = 0.0
+        kin.vy = 0.0
+        kin.v_theta = 0.0
+        self.robot._on_kinematics(kin)
+
+        expected_theta = 0.0 + 0.2 * (math.pi / 2)
+        self.assertAlmostEqual(self.robot.get_fused_orientation(), math.degrees(expected_theta), places=6)
+
+    def test_set_fusion_alpha_is_clamped(self) -> None:
+        # Alpha is now stored on the fusion strategy object as _fusion.alpha.
+        self.robot.set_orientation_fusion_alpha(2.0)
+        self.assertEqual(self.robot._fusion.alpha, 1.0)
+        self.robot.set_orientation_fusion_alpha(-1.0)
+        self.assertEqual(self.robot._fusion.alpha, 0.0)
 
 
 if __name__ == "__main__":

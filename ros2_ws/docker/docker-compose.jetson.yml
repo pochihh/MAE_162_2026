@@ -1,0 +1,63 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# docker-compose.jetson.yml — Jetson Nano / Orin Nano GPS stack
+#
+# Usage (from Project-NUEVO/ repository root):
+#   docker compose -f ros2_ws/docker/docker-compose.jetson.yml up -d
+#
+# First startup builds bridge_interfaces + global_gps (~60 s), then the
+# container stays idle.  Start the localizer with:
+#   docker compose -f ros2_ws/docker/docker-compose.jetson.yml \
+#       exec global_gps bash
+#   ros2 launch global_gps global_gps.launch.py
+#
+# The RealSense camera must be connected over USB before starting the container.
+# ─────────────────────────────────────────────────────────────────────────────
+
+services:
+  global_gps:
+    build:
+      context: ../..
+      dockerfile: ros2_ws/docker/Dockerfile.jetson
+
+    image: nuevo-global-gps:latest
+
+    # ROS2 DDS uses UDP multicast — requires host networking so that
+    # /global_gps/tag_detections is visible to all robots on the LAN.
+    network_mode: host
+
+    # RealSense camera USB access.
+    # The device path varies by host; mounting the full USB bus is the
+    # most reliable approach across JetPack versions.
+    volumes:
+      - /dev/bus/usb:/dev/bus/usb
+      # ROS workspace source — live from repo.
+      - ../../ros2_ws/src:/ros2_ws/src:ro
+      # colcon build cache — wipe with: docker compose down -v
+      - jetson_build:/ros2_ws/build
+      - jetson_install:/ros2_ws/install
+
+    # privileged is required for librealsense2 to access the USB device
+    # via its user-space kernel bypass driver (libusb).
+    privileged: true
+
+    environment:
+      # Jazzy uses ROS_AUTOMATIC_DISCOVERY_RANGE instead of the deprecated
+      # ROS_LOCALHOST_ONLY.  SUBNET enables multicast discovery on the LAN.
+      - ROS_AUTOMATIC_DISCOVERY_RANGE=SUBNET
+      # Keep the deprecated flag off too so it doesn't override the above.
+      - ROS_LOCALHOST_ONLY=0
+      # Use the same domain ID as the robot stack.
+      - ROS_DOMAIN_ID=0
+
+    restart: unless-stopped
+
+    healthcheck:
+      test: ["CMD-SHELL", "test -f /ros2_ws/install/setup.bash"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 120s
+
+volumes:
+  jetson_build:
+  jetson_install:

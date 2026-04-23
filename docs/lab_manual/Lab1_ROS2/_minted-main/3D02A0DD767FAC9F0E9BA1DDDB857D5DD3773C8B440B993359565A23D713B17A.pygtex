@@ -1,0 +1,7 @@
+\begin{Verbatim}[commandchars=\\\{\}]
+\PYG{n+nb}{cd}\PYG{+w}{ }nuevo\PYGZus{}ui/frontend
+npm\PYG{+w}{ }install
+npm\PYG{+w}{ }run\PYG{+w}{ }build
+\PYG{n+nb}{cd}\PYG{+w}{ }../..
+cp\PYG{+w}{ }\PYGZhy{}r\PYG{+w}{ }nuevo\PYGZus{}ui/frontend/dist/.\PYG{+w}{ }nuevo\PYGZus{}ui/backend/static/
+\end{Verbatim}

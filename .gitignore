@@ -4,10 +4,15 @@
 # Local development environment
 # ============================================
 .claude/
+.agents/
+plugins/
 .codex
 .vscode/
 .local/
 openspec/
+*PLAN.md
+CLAUDE.md
+AGENTS.md
 
 # ============================================
 # ROS2 Workspace
@@ -189,10 +194,17 @@ secrets/
 *.tmp
 temp/
 tmp/
+build/
+get-docker.sh
 
 # Compressed files (keep intentional archives, ignore temp)
 *.zip.tmp
 *.tar.gz.tmp
+
+# ============================================
+# Lab Documentation (generated/student-facing, not tracked)
+# ============================================
+ros2_ws/src/lab_docs/
 
 # ============================================
 # Project Specific
@@ -201,7 +213,7 @@ tmp/
 test_data/
 logs/
 *.log
-
+*.png
 
 # TLV Type Generated Definitions
 # TLV_TypeDefs.h

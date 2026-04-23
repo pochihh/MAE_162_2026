@@ -6,6 +6,9 @@ find_package(rosidl_default_generators REQUIRED)
 find_package(std_msgs REQUIRED)
 
 set(msg_files
+  # Global GPS / field localizer
+  "msg/TagDetection.msg"
+  "msg/TagDetectionArray.msg"
   # Raw bridge telemetry
   "msg/SystemState.msg"
   "msg/SystemPower.msg"
