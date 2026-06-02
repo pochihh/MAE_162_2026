@@ -77,12 +77,12 @@ PAN_SCAN_STEP  = 2.0    # deg per tick while scanning (no target)
 # ---------------------------------------------------------------------------
 
 STEP_INTERVAL_S  = 0.16  # seconds between correction steps
-COARSE_THRESH_PX = 170   # px — use coarse step when error exceeds this
+COARSE_THRESH_PX = 100   # px — use coarse step when error exceeds this
 
 PAN_STEP_COARSE  = 5.0   # deg per step when error > COARSE_THRESH_PX
-PAN_STEP_FINE    = 0.16    # deg per step when error <= COARSE_THRESH_PX
+PAN_STEP_FINE    = 0.05    # deg per step when error <= COARSE_THRESH_PX
 CENTER_TOL_PX    = 3   # px — no step taken when within this of centre
-AIM_OFFSET_PX    = 10   # aim this many px below the detected target centre
+AIM_OFFSET_PX    = 12   # aim this many px below the detected target centre
 
 PITCH_MOTOR = 3
 PITCH_PWM   = 200
@@ -90,7 +90,11 @@ PITCH_PWM   = 200
 PITCH_STEP_INTERVAL_S  = 0.8   # dead time between pulses
 PITCH_COARSE_THRESH_PX = 50    # px — above this use coarse pulse
 PITCH_PULSE_COARSE_S   = 0.18  # pulse on-time when far from centre
-PITCH_PULSE_FINE_S     = 0.016  # pulse on-time when within PITCH_COARSE_THRESH_PX
+PITCH_PULSE_FINE_S     = 0.012  # pulse on-time when within PITCH_COARSE_THRESH_PX
+
+# Scan-mode pitch sweep — slow oscillation up/down while no target is visible
+PITCH_SCAN_PWM        = 80    # slow drive during scan (< PITCH_PWM)
+PITCH_SCAN_HALF_S     = 1.5   # seconds in each direction before reversing
 
 # ---------------------------------------------------------------------------
 # Image brightness/contrast boost applied to every frame
@@ -272,6 +276,17 @@ def run(robot: Robot) -> None:
     ip = socket.gethostbyname(socket.gethostname())
     print(f"[track] stream  → http://{ip}:{STREAM_PORT}")
 
+    # Wait for hardware bridge to be ready before sending enable commands.
+    # Without this, messages published immediately after node spin-up can be
+    # dropped if the bridge subscriber hasn't matched yet, leaving M3 disabled.
+    _deadline = time.monotonic() + 10.0
+    print("[track] waiting for hardware bridge…")
+    while robot.get_dc_state() is None:
+        if time.monotonic() > _deadline:
+            print("[track] WARNING: bridge not responding — enabling anyway")
+            break
+        time.sleep(0.05)
+
     # Enable hardware
     robot.enable_servo(PAN_CHANNEL)
     robot.enable_servo(SHOOT_CHANNEL)
@@ -280,6 +295,8 @@ def run(robot: Robot) -> None:
     pan_deg            = PAN_CENTER_DEG
     pitch_pwm          = 0
     scan_dir           = 1
+    pitch_scan_dir     = 1
+    pitch_scan_start   = time.monotonic()
     state              = "SCAN"
     last_pitch_step_at = 0.0
     pitch_pulse_end_at = 0.0
@@ -327,6 +344,7 @@ def run(robot: Robot) -> None:
             if detection:
                 tx, ty, _ = detection
                 state = "TRACK"
+                pitch_scan_start = now  # reset scan sweep for next time
 
                 # EMA smooth detection to reduce frame-to-frame noise
                 if smooth_tx is None:
@@ -336,7 +354,7 @@ def run(robot: Robot) -> None:
                     smooth_ty += _TARGET_EMA * (ty - smooth_ty)
 
                 pan_err   = smooth_tx - (_CAM_WIDTH  // 2)
-                pitch_err = (smooth_ty + AIM_OFFSET_PX) - (_CAM_HEIGHT // 2)
+                pitch_err = (smooth_ty - AIM_OFFSET_PX) - (_CAM_HEIGHT // 2)
 
                 # Shoot when centred for >= 1 s — fires servo 15 in a background thread
                 centred = abs(pan_err) <= CENTER_TOL_PX and abs(pitch_err) <= CENTER_TOL_PX
@@ -389,10 +407,8 @@ def run(robot: Robot) -> None:
                 state              = "SCAN"
                 smooth_tx          = None
                 smooth_ty          = None
-                pitch_pwm          = 0
                 pitch_pulse_end_at = 0.0
                 locked_pos         = None
-                robot.set_motor_pwm(PITCH_MOTOR, 0)
 
                 # Sweep pan while searching
                 if now - last_step_at >= STEP_INTERVAL_S:
@@ -405,6 +421,13 @@ def run(robot: Robot) -> None:
                         scan_dir = 1
                     robot.set_servo(PAN_CHANNEL, pan_deg)
                     last_step_at = now
+
+                # Sweep pitch up/down while searching
+                if now - pitch_scan_start >= PITCH_SCAN_HALF_S:
+                    pitch_scan_dir   = -pitch_scan_dir
+                    pitch_scan_start = now
+                pitch_pwm = pitch_scan_dir * PITCH_SCAN_PWM
+                robot.set_motor_pwm(PITCH_MOTOR, pitch_pwm)
 
 
             # Encode annotated frame for stream

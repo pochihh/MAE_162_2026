@@ -7,6 +7,7 @@ from ament_index_python.packages import get_package_share_directory
 from bridge_interfaces.msg import VisionDetection, VisionDetectionArray
 import rclpy
 from rclpy.node import Node
+from sensor_msgs.msg import Image
 
 from vision.camera_utils import ManagedCamera
 from vision.debug_utils import DetectionDebugWriter
@@ -102,6 +103,7 @@ class VisionNode(Node):
         self._log_interval_sec = max(1.0, float(self.get_parameter("log_interval_sec").value))
 
         self._publisher = self.create_publisher(VisionDetectionArray, "/vision/detections", 10)
+        self._image_publisher = self.create_publisher(Image, "/camera/image_raw", 1)
         self._camera = ManagedCamera(
             device=self._camera_device,
             width=self._camera_width,
@@ -204,6 +206,17 @@ class VisionNode(Node):
                 continue
 
             capture_stamp = self.get_clock().now().to_msg()
+
+            img_msg = Image()
+            img_msg.header.stamp = capture_stamp
+            img_msg.height = frame.shape[0]
+            img_msg.width = frame.shape[1]
+            img_msg.encoding = "bgr8"
+            img_msg.is_bigendian = False
+            img_msg.step = frame.shape[1] * 3
+            img_msg.data = frame.tobytes()
+            self._image_publisher.publish(img_msg)
+
             inference_start = time.monotonic()
             try:
                 yolo_detections = self._infer_yolo_detections(frame)
