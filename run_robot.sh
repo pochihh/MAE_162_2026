@@ -54,7 +54,8 @@ echo "[3/6] checking vision_node..."
 VISION_RUNNING=$(_exec "ps aux | grep '[v]ision_node' | grep -v grep | wc -l")
 if [ "$VISION_RUNNING" -eq 0 ]; then
     echo "[3/6] starting vision_node..."
-    _exec "$ROS_SETUP && nohup ros2 run vision vision_node > /tmp/vision.log 2>&1 &"
+    _exec "$ROS_SETUP && nohup ros2 run vision vision_node \
+        --ros-args -p confidence_threshold:=0.10 > /tmp/vision.log 2>&1 &"
     sleep 1
 else
     echo "[3/6] vision_node already running — OK"

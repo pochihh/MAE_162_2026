@@ -62,6 +62,8 @@ LAPF_MAX_S           = 55.0    # fallback: leave SEG2 after this many seconds ev
 
 STATUS_INTERVAL_S    = 0.5
 BTN3_HOLD_TICKS      = 10   # ~0.2 s at 50 Hz — ignore glitches shorter than this
+GREEN_HOLD_TICKS     = 10   # same hold before green-light trigger fires
+GREEN_MIN_CONFIDENCE = 0.30 # must match vision_node confidence_threshold in run_robot.sh
 
 # ---------------------------------------------------------------------------
 # SEG3 wall-following parameters — L-channel (1525,3350)→(2440,3350)→(2440,330)
@@ -169,6 +171,7 @@ def _seg3_measure_wall(
 
 def configure_robot(robot: Robot) -> None:
     robot.set_unit(POSITION_UNIT)
+    robot.enable_vision()
     robot.set_odometry_parameters(
         wheel_diameter=WHEEL_DIAMETER,
         wheel_base=WHEEL_BASE,
@@ -231,6 +234,16 @@ def start_lapf(robot: Robot):
         leash_half_angle_deg=LAPF_HALF_ANGLE_DEG,
         blocking=False,
     )
+
+
+def _is_green_light(robot: Robot) -> bool:
+    """Return True if the vision node reports a confirmed green traffic light."""
+    if not robot.is_vision_active(timeout_s=3.0):
+        return False
+    color = robot.get_detection_attribute(
+        "traffic light", "color", min_confidence=GREEN_MIN_CONFIDENCE
+    )
+    return color == "green"
 
 
 def show_idle_leds(robot: Robot) -> None:
@@ -348,6 +361,7 @@ def _run(robot: Robot) -> None:
     # consecutive ticks before accepting — guards against firmware-init glitches.
     btn3_was_released = False
     btn3_hold_count   = 0
+    green_hold_count  = 0
 
     while True:
         now = time.monotonic()
@@ -355,24 +369,54 @@ def _run(robot: Robot) -> None:
         # ------------------------------------------------------------------
         if state == "IDLE":
             show_idle_leds(robot)
+
+            # ── Trigger 1: BTN_3 held ────────────────────────────────────────
             btn3_now = robot.get_button(Button.BTN_3)
             if not btn3_now:
                 btn3_was_released = True
                 btn3_hold_count   = 0
             elif btn3_was_released:
                 btn3_hold_count += 1
-                print(f"[IDLE] BTN3 held tick {btn3_hold_count}/{BTN3_HOLD_TICKS}")
-                if btn3_hold_count >= BTN3_HOLD_TICKS:
-                    print("[FSM] IDLE → PP_SEG1")
-                    robot.reset_odometry()
-                    robot.wait_for_odometry_reset(timeout=2.0)
-                    x, y, theta = robot.get_pose()
-                    print(f"[FSM] start reset  pose=({x:.0f},{y:.0f}) θ={theta:.1f}°")
-                    init_pp(robot, PATH_SEG1_CTRL)
+                if btn3_hold_count == 1:
+                    print(f"[IDLE] BTN3 held — waiting {BTN3_HOLD_TICKS} ticks")
 
-                    show_moving_leds(robot)
-                    btn3_hold_count = 0
-                    state = "PP_SEG1"
+            # ── Trigger 2: green traffic light ──────────────────────────────
+            if _is_green_light(robot):
+                green_hold_count += 1
+                if green_hold_count == 1:
+                    print(f"[IDLE] green light seen — waiting {GREEN_HOLD_TICKS} ticks")
+            else:
+                green_hold_count = 0
+
+            # ── Periodic stoplight status ────────────────────────────────────
+            if now - last_status_at >= STATUS_INTERVAL_S:
+                last_status_at = now
+                dets = robot.get_detections("traffic light")
+                if not robot.is_vision_active(timeout_s=3.0):
+                    print("[IDLE] vision_node not active")
+                elif dets:
+                    best = max(dets, key=lambda d: float(d["confidence"]))
+                    color = best.get("attributes", {}).get("color", {}).get("value", "?")
+                    conf  = float(best["confidence"])
+                    print(f"[IDLE] traffic light detected  color={color}  conf={conf:.0%}")
+                else:
+                    print("[IDLE] vision active — no traffic light detected")
+
+            # ── OR: either trigger fires the start ───────────────────────────
+            btn3_fire  = btn3_was_released and btn3_hold_count  >= BTN3_HOLD_TICKS
+            green_fire = green_hold_count >= GREEN_HOLD_TICKS
+            if btn3_fire or green_fire:
+                trigger = "BTN3" if btn3_fire else "green light"
+                print(f"[FSM] IDLE → PP_SEG1  (trigger: {trigger})")
+                robot.reset_odometry()
+                robot.wait_for_odometry_reset(timeout=2.0)
+                x, y, theta = robot.get_pose()
+                print(f"[FSM] start reset  pose=({x:.0f},{y:.0f}) θ={theta:.1f}°")
+                init_pp(robot, PATH_SEG1_CTRL)
+                show_moving_leds(robot)
+                btn3_hold_count  = 0
+                green_hold_count = 0
+                state = "PP_SEG1"
 
         # ------------------------------------------------------------------
         elif state == "PP_SEG1":
