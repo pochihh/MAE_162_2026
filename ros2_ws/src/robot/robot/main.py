@@ -19,7 +19,7 @@ from robot.examples.lidar_viz import LidarViz
 # ---------------------------------------------------------------------------
 
 POSITION_UNIT        = Unit.MM
-WHEEL_DIAMETER       = 74.0
+WHEEL_DIAMETER       = 78.0
 WHEEL_BASE           = 321.0
 INITIAL_THETA_DEG    = 90.0
 
@@ -53,7 +53,7 @@ LAPF_MAX_ANGULAR     = 1.2
 LAPF_LEASH_MM        = 250.0
 LAPF_HALF_ANGLE_DEG  = 85.0    # <90° keeps virtual target in forward hemisphere; was 120° (caused backward spin)
 LAPF_REPULSION_MM    = 430.0   # cone surface → start of gradient (inflation + 215mm reaction zone)
-LAPF_INFLATION_MM    = 140.0   # robot half-width (165) + 50mm safety margin
+LAPF_INFLATION_MM    = 165.0   # robot half-width (165) + 50mm safety margin
 LAPF_TARGET_SPD_MM_S = 200.0
 LAPF_REPULSION_GAIN  = 200.0   # 6 simultaneous cones × 5.3 each was 32× attraction; halved to reduce stack-up
 LAPF_ATTRACTION_GAIN = 3.0     # was 1.0; 3× boost to help pull through initial all-ahead-cone phase
@@ -80,9 +80,10 @@ SEG3_K_HEADING           = 0.8    # deg/s per deg of wall slope angle
 SEG3_K_LATERAL           = 0.08   # deg/s per mm of lateral error from target
 
 SEG3_LEFT_TARGET_MM      = 280.0  # 560mm corridor / 2 = centre
-SEG3_CORNER_MM           = 350.0  # turn south when forward obstacle < this (end of east leg)
+SEG3_CORNER_MM           = 280.0  # turn south when forward obstacle < this (end of east leg)
 SEG3_EAST_MIN_TRAVEL_MM  = 700.0  # must travel this far east before corner detection is allowed
-SEG3_SOUTH_DIST_MM       = 2650.0 # odometry distance to travel in south leg before done
+SEG3_SOUTH_DIST_MM       = 3000.0 # total odometry distance in south leg before done
+SEG3_SOUTH_WALL_MM       = 2600.0 # walls end here — coast straight for the remaining distance
 
 # ---------------------------------------------------------------------------
 # GPS position fusion
@@ -102,8 +103,8 @@ PATH_SEG1_CTRL = [
     (   0.0,    0.0),
     (   0.0, 3350.0),
     ( 580.0, 3350.0),
-    ( 580.0,  480.0),
-    (1525.0,  480.0),
+    ( 580.0,  450.0),
+    (1525.0,  450.0),
 ]
 
 
@@ -368,6 +369,7 @@ def _run(robot: Robot) -> None:
                     x, y, theta = robot.get_pose()
                     print(f"[FSM] start reset  pose=({x:.0f},{y:.0f}) θ={theta:.1f}°")
                     init_pp(robot, PATH_SEG1_CTRL)
+
                     show_moving_leds(robot)
                     btn3_hold_count = 0
                     state = "PP_SEG1"
@@ -382,6 +384,7 @@ def _run(robot: Robot) -> None:
                 x, y, theta = robot.get_pose()
                 print(f"[FSM] PP_SEG1 done  pose=({x:.0f},{y:.0f}) θ={theta:.1f}°"
                       f" — turning to 90°")
+
                 robot.turn_to(90.0, blocking=True, tolerance_deg=3.0, timeout=10.0)
                 x, y, theta = robot.get_pose()
                 print(f"[FSM] turn done  θ={theta:.1f}° → starting LAPF")
@@ -479,24 +482,29 @@ def _run(robot: Robot) -> None:
                 print_status(robot, "DONE")
                 return
 
-            raw_pts = robot.get_obstacles()
-            perp_dist, wall_slope_deg, fwd_min = _seg3_measure_wall(raw_pts)
-
-            if fwd_min < SEG3_STOP_MM:
-                robot.set_velocity(0.0, 0.0)
+            if dist_traveled < SEG3_SOUTH_WALL_MM:
+                raw_pts = robot.get_obstacles()
+                perp_dist, wall_slope_deg, fwd_min = _seg3_measure_wall(raw_pts)
+                if fwd_min < SEG3_STOP_MM:
+                    robot.set_velocity(0.0, 0.0)
+                else:
+                    lat_err = (perp_dist - SEG3_LEFT_TARGET_MM) if perp_dist is not None else 0.0
+                    angular = SEG3_K_HEADING * wall_slope_deg + SEG3_K_LATERAL * lat_err
+                    angular = max(-SEG3_MAX_ANG_DEG, min(SEG3_MAX_ANG_DEG, angular))
+                    t = (fwd_min - SEG3_STOP_MM) / max(1.0, SEG3_CRUISE_MM - SEG3_STOP_MM)
+                    robot.set_velocity(SEG3_MAX_SPEED * max(0.0, min(1.0, t)), angular)
+                if now - last_status_at >= STATUS_INTERVAL_S:
+                    pd_str = f"{perp_dist:.0f}" if perp_dist is not None else "N/A"
+                    print(f"[SEG3_SOUTH]  pose=({x:.0f},{y:.0f}) θ={theta_deg:.1f}°"
+                          f"  dist={dist_traveled:.0f}/{SEG3_SOUTH_DIST_MM:.0f}mm"
+                          f"  wall={pd_str}mm  slope={wall_slope_deg:+.1f}°  fwd={fwd_min:.0f}mm")
+                    last_status_at = now
             else:
-                lat_err = (perp_dist - SEG3_LEFT_TARGET_MM) if perp_dist is not None else 0.0
-                angular = SEG3_K_HEADING * wall_slope_deg + SEG3_K_LATERAL * lat_err
-                angular = max(-SEG3_MAX_ANG_DEG, min(SEG3_MAX_ANG_DEG, angular))
-                t = (fwd_min - SEG3_STOP_MM) / max(1.0, SEG3_CRUISE_MM - SEG3_STOP_MM)
-                robot.set_velocity(SEG3_MAX_SPEED * max(0.0, min(1.0, t)), angular)
-
-            if now - last_status_at >= STATUS_INTERVAL_S:
-                pd_str = f"{perp_dist:.0f}" if perp_dist is not None else "N/A"
-                print(f"[SEG3_SOUTH]  pose=({x:.0f},{y:.0f}) θ={theta_deg:.1f}°"
-                      f"  dist={dist_traveled:.0f}/{SEG3_SOUTH_DIST_MM:.0f}mm"
-                      f"  wall={pd_str}mm  slope={wall_slope_deg:+.1f}°  fwd={fwd_min:.0f}mm")
-                last_status_at = now
+                robot.set_velocity(SEG3_MAX_SPEED, 0.0)
+                if now - last_status_at >= STATUS_INTERVAL_S:
+                    print(f"[SEG3_SOUTH]  pose=({x:.0f},{y:.0f}) θ={theta_deg:.1f}°"
+                          f"  dist={dist_traveled:.0f}/{SEG3_SOUTH_DIST_MM:.0f}mm  [open — coasting straight]")
+                    last_status_at = now
 
         # ------------------------------------------------------------------
         if robot.get_button(Button.BTN_2):

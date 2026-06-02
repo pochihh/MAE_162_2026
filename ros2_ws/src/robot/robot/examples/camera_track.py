@@ -1,7 +1,7 @@
 """
 camera_track.py — blue-target tracking with pan servo and pitch motor
 ======================================================================
-Reads the camera, detects a #007FFF blue target, and drives:
+Reads the camera, detects a red target (RGB 207,19,47), and drives:
   - Servo CH 16  (pan  — left/right)  via set_servo()     0–180°
   - Motor M3 PWM (pitch — up/down)    via set_motor_pwm()  ±200 (pulse)
 
@@ -42,12 +42,25 @@ _CAM_FPS        = 30
 _FRAME_BYTES    = _CAM_WIDTH * _CAM_HEIGHT * 3  # bgr24
 
 # ---------------------------------------------------------------------------
-# Blue target: #007FFF = RGB(0, 127, 255) → HSV H ≈ 105 (OpenCV 0–179 scale)
+# Red target: RGB(207,19,47) = HSV(351°,91%,81%) → OpenCV H=176, S=232, V=207
+# Broad range: wide S/V floors to catch real-world lighting variation
 # ---------------------------------------------------------------------------
 
-_HSV_LOW  = np.array([ 95, 120,  80], dtype=np.uint8)
-_HSV_HIGH = np.array([115, 255, 255], dtype=np.uint8)
+_HSV_RED_LOW1  = np.array([159, 131,  99], dtype=np.uint8)
+_HSV_RED_HIGH1 = np.array([179, 255, 255], dtype=np.uint8)
+_HSV_RED_LOW2  = np.array([  0, 131,  99], dtype=np.uint8)
+_HSV_RED_HIGH2 = np.array([ 11, 255, 255], dtype=np.uint8)
 _MIN_BLOB_AREA = 500  # px² — ignore noise
+
+# ---------------------------------------------------------------------------
+# Shoot servo (CH 15) — fires when target is centred
+# ---------------------------------------------------------------------------
+
+SHOOT_CHANNEL    = 15
+SHOOT_A_DEG      = 95.0   # resting position
+SHOOT_B_DEG      = 170.0  # fired position
+SHOOT_SETTLE_S   = 0.5    # hold time at fired position before returning
+SHOOT_COOLDOWN_S = 3.0    # minimum seconds between shots
 
 # ---------------------------------------------------------------------------
 # Pan servo (CH 16)
@@ -57,29 +70,35 @@ PAN_CHANNEL    = 16
 PAN_CENTER_DEG = 90.0
 PAN_MIN_DEG    = 0.0
 PAN_MAX_DEG    = 180.0
-PAN_SCAN_STEP  = 0.4    # deg per tick while scanning (no target)
+PAN_SCAN_STEP  = 2.0    # deg per tick while scanning (no target)
 
 # ---------------------------------------------------------------------------
 # Step-based tracking — one fixed step every STEP_INTERVAL_S
 # ---------------------------------------------------------------------------
 
-STEP_INTERVAL_S  = 0.2   # seconds between correction steps
-COARSE_THRESH_PX = 200   # px — use coarse step when error exceeds this
+STEP_INTERVAL_S  = 0.16  # seconds between correction steps
+COARSE_THRESH_PX = 170   # px — use coarse step when error exceeds this
 
-PAN_STEP_COARSE  = 4.0   # deg per step when error > COARSE_THRESH_PX
-PAN_STEP_FINE    = 0.5   # deg per step when error <= COARSE_THRESH_PX
-CENTER_TOL_PX    = 10    # px — no step taken when within this of centre
+PAN_STEP_COARSE  = 5.0   # deg per step when error > COARSE_THRESH_PX
+PAN_STEP_FINE    = 0.16    # deg per step when error <= COARSE_THRESH_PX
+CENTER_TOL_PX    = 3   # px — no step taken when within this of centre
+AIM_OFFSET_PX    = 10   # aim this many px below the detected target centre
 
 PITCH_MOTOR = 3
-PITCH_PWM   = 250   # full drive — motor won't move below this
+PITCH_PWM   = 200
+
+PITCH_STEP_INTERVAL_S  = 0.8   # dead time between pulses
+PITCH_COARSE_THRESH_PX = 50    # px — above this use coarse pulse
+PITCH_PULSE_COARSE_S   = 0.18  # pulse on-time when far from centre
+PITCH_PULSE_FINE_S     = 0.016  # pulse on-time when within PITCH_COARSE_THRESH_PX
 
 # ---------------------------------------------------------------------------
 # Image brightness/contrast boost applied to every frame
 #   alpha > 1.0 = more contrast, beta > 0 = brighter (0–255 shift)
 # ---------------------------------------------------------------------------
 
-CAM_ALPHA = 1.4   # contrast multiplier
-CAM_BETA  = 40    # brightness additive offset
+CAM_ALPHA = 1.2   # contrast multiplier
+CAM_BETA  = 10    # brightness additive offset
 
 # ---------------------------------------------------------------------------
 # Target smoothing — EMA on detected (cx, cy) to reduce jitter
@@ -138,27 +157,27 @@ def _camera_thread() -> None:
 # Detection
 # ---------------------------------------------------------------------------
 
-def _detect_blue(frame: np.ndarray) -> tuple[int, int, int] | None:
-    """Return (cx, cy, radius) of the largest blue blob, or None."""
+def _detect_target(frame: np.ndarray) -> list[tuple[int, int, int]]:
+    """Return all red blobs as (cx, cy, radius), largest first."""
     hsv  = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
-    mask = cv2.inRange(hsv, _HSV_LOW, _HSV_HIGH)
+    mask = cv2.bitwise_or(
+        cv2.inRange(hsv, _HSV_RED_LOW1, _HSV_RED_HIGH1),
+        cv2.inRange(hsv, _HSV_RED_LOW2, _HSV_RED_HIGH2),
+    )
     k    = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
     mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN,  k)
     mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, k)
     cnts, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
-    best_cnt, best_area = None, 0.0
+    blobs = []
     for c in cnts:
         area = cv2.contourArea(c)
-        if area > _MIN_BLOB_AREA and area > best_area:
-            best_area = area
-            best_cnt  = c
+        if area > _MIN_BLOB_AREA:
+            (cx, cy), radius = cv2.minEnclosingCircle(c)
+            blobs.append((int(cx), int(cy), int(radius), area))
 
-    if best_cnt is None:
-        return None
-
-    (cx, cy), radius = cv2.minEnclosingCircle(best_cnt)
-    return int(cx), int(cy), int(radius)
+    blobs.sort(key=lambda b: b[3], reverse=True)
+    return [(cx, cy, r) for cx, cy, r, _ in blobs]
 
 
 # ---------------------------------------------------------------------------
@@ -255,23 +274,31 @@ def run(robot: Robot) -> None:
 
     # Enable hardware
     robot.enable_servo(PAN_CHANNEL)
+    robot.enable_servo(SHOOT_CHANNEL)
     robot.enable_motor(PITCH_MOTOR, DCMotorMode.PWM)
 
-    pan_deg       = PAN_CENTER_DEG
-    pitch_pwm     = 0
-    scan_dir      = 1
-    state         = "SCAN"
+    pan_deg            = PAN_CENTER_DEG
+    pitch_pwm          = 0
+    scan_dir           = 1
+    state              = "SCAN"
+    last_pitch_step_at = 0.0
+    pitch_pulse_end_at = 0.0
     smooth_tx: float | None = None
     smooth_ty: float | None = None
-    last_step_at  = 0.0   # monotonic time of last correction step
+    last_step_at  = 0.0
+    last_shot_at  = -SHOOT_COOLDOWN_S
+    shooting      = False
+    locked_pos: tuple[int, int] | None = None
+    centred_since: float | None = None
 
     robot.set_servo(PAN_CHANNEL, pan_deg)
+    robot.set_servo(SHOOT_CHANNEL, SHOOT_A_DEG)
     robot.set_motor_pwm(PITCH_MOTOR, 0)
 
     period    = 1.0 / float(DEFAULT_FSM_HZ)
     next_tick = time.monotonic()
 
-    print(f"[track] scanning for #007FFF  pan={pan_deg:.0f}°  Ctrl+C to stop")
+    print(f"[track] scanning for red target  pan={pan_deg:.0f}°  Ctrl+C to stop")
 
     try:
         while True:
@@ -282,8 +309,20 @@ def run(robot: Robot) -> None:
                 time.sleep(0.05)
                 continue
 
-            detection = _detect_blue(frame)
+            blobs = _detect_target(frame)
             now = time.monotonic()
+
+            # Target locking: once acquired, follow the spatially closest blob
+            if blobs:
+                if locked_pos is None:
+                    detection = blobs[0]  # acquire largest
+                else:
+                    lx, ly = locked_pos
+                    detection = min(blobs, key=lambda b: (b[0]-lx)**2 + (b[1]-ly)**2)
+                locked_pos = (detection[0], detection[1])
+            else:
+                detection = None
+                locked_pos = None
 
             if detection:
                 tx, ty, _ = detection
@@ -297,10 +336,31 @@ def run(robot: Robot) -> None:
                     smooth_ty += _TARGET_EMA * (ty - smooth_ty)
 
                 pan_err   = smooth_tx - (_CAM_WIDTH  // 2)
-                pitch_err = smooth_ty - (_CAM_HEIGHT // 2)
+                pitch_err = (smooth_ty + AIM_OFFSET_PX) - (_CAM_HEIGHT // 2)
 
-                # Pan: step-based (servo holds position between steps)
-                if now - last_step_at >= STEP_INTERVAL_S:
+                # Shoot when centred for >= 1 s — fires servo 15 in a background thread
+                centred = abs(pan_err) <= CENTER_TOL_PX and abs(pitch_err) <= CENTER_TOL_PX
+                if centred and not shooting:
+                    if centred_since is None:
+                        centred_since = now
+                    elif now - centred_since >= 1.0 and now - last_shot_at >= SHOOT_COOLDOWN_S:
+                        centred_since = None
+                        shooting      = True
+                        last_shot_at  = now
+                        print("[shoot] firing CH15")
+                        def _shoot():
+                            nonlocal shooting
+                            robot.set_servo(SHOOT_CHANNEL, SHOOT_B_DEG)
+                            time.sleep(SHOOT_SETTLE_S)
+                            robot.set_servo(SHOOT_CHANNEL, SHOOT_A_DEG)
+                            shooting = False
+                            print("[shoot] reset CH15")
+                        threading.Thread(target=_shoot, daemon=True).start()
+                else:
+                    centred_since = None
+
+                # Pan: step-based — hold pan still while shooting
+                if not shooting and now - last_step_at >= STEP_INTERVAL_S:
                     if abs(pan_err) > CENTER_TOL_PX:
                         pan_step = PAN_STEP_COARSE if abs(pan_err) > COARSE_THRESH_PX else PAN_STEP_FINE
                         pan_deg = float(np.clip(
@@ -310,18 +370,28 @@ def run(robot: Robot) -> None:
                         robot.set_servo(PAN_CHANNEL, pan_deg)
                         last_step_at = now
 
-                # Pitch: continuous ±200 toward center, zero when within tolerance
-                if abs(pitch_err) > CENTER_TOL_PX:
-                    pitch_pwm = int(math.copysign(PITCH_PWM, pitch_err))
+                # Pitch: pulse-based — hold still while shooting
+                if not shooting and abs(pitch_err) > CENTER_TOL_PX:
+                    if now < pitch_pulse_end_at:
+                        pitch_pwm = int(math.copysign(PITCH_PWM, pitch_err))
+                    elif now - last_pitch_step_at >= PITCH_STEP_INTERVAL_S:
+                        dur = PITCH_PULSE_COARSE_S if abs(pitch_err) > PITCH_COARSE_THRESH_PX else PITCH_PULSE_FINE_S
+                        pitch_pulse_end_at = now + dur
+                        last_pitch_step_at = now
+                        pitch_pwm = int(math.copysign(PITCH_PWM, pitch_err))
+                    else:
+                        pitch_pwm = 0
                 else:
                     pitch_pwm = 0
                 robot.set_motor_pwm(PITCH_MOTOR, pitch_pwm)
 
             else:
-                state     = "SCAN"
-                smooth_tx = None
-                smooth_ty = None
-                pitch_pwm = 0
+                state              = "SCAN"
+                smooth_tx          = None
+                smooth_ty          = None
+                pitch_pwm          = 0
+                pitch_pulse_end_at = 0.0
+                locked_pos         = None
                 robot.set_motor_pwm(PITCH_MOTOR, 0)
 
                 # Sweep pan while searching
@@ -335,6 +405,7 @@ def run(robot: Robot) -> None:
                         scan_dir = 1
                     robot.set_servo(PAN_CHANNEL, pan_deg)
                     last_step_at = now
+
 
             # Encode annotated frame for stream
             ann = _annotate(frame, detection, pan_deg, pitch_pwm, state)
@@ -353,6 +424,7 @@ def run(robot: Robot) -> None:
         robot.set_motor_pwm(PITCH_MOTOR, 0)
         robot.disable_motor(PITCH_MOTOR)
         robot.disable_servo(PAN_CHANNEL)
+        robot.disable_servo(SHOOT_CHANNEL)
         server.shutdown()
         print("[track] stopped — hardware zeroed")
 

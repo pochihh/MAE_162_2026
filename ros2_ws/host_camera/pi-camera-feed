@@ -38,7 +38,7 @@ if [[ ! -c "$PI_CAMERA_DEVICE" ]]; then
         video_nr="$PI_CAMERA_VIDEO_NR" \
         card_label="$PI_CAMERA_CARD_LABEL" \
         exclusive_caps=1 \
-        max_buffers=4 || true
+        max_buffers=1 || true
 fi
 
 for _ in {1..20}; do

@@ -1,5 +1,5 @@
 """
-blue_tracker.py — detects #007FFF blue, circles the target, and prints its center.
+blue_tracker.py — detects red targets, circles them, and prints the center.
 Serves annotated feed at http://<pi-ip>:8081
 """
 
@@ -18,9 +18,12 @@ PORT   = 8081
 
 FRAME_BYTES = WIDTH * HEIGHT * 3  # ffmpeg outputs bgr24
 
-# #007FFF = RGB(0, 127, 255) → HSV ≈ (105, 255, 255) in OpenCV scale (H:0-179)
-HSV_LOW  = np.array([ 95, 120, 80],  dtype=np.uint8)
-HSV_HIGH = np.array([115, 255, 255], dtype=np.uint8)
+# Target: RGB(207,19,47) = HSV(351°,91%,81%) → OpenCV H=176, S=232, V=207
+# Broad range: wide S/V floors to catch real-world lighting variation
+HSV_RED_LOW1  = np.array([159, 131,  99], dtype=np.uint8)
+HSV_RED_HIGH1 = np.array([179, 255, 255], dtype=np.uint8)
+HSV_RED_LOW2  = np.array([  0, 131,  99], dtype=np.uint8)
+HSV_RED_HIGH2 = np.array([ 11, 255, 255], dtype=np.uint8)
 
 MIN_CONTOUR_AREA = 500  # px² — ignore tiny noise blobs
 
@@ -33,7 +36,10 @@ def _process_frame(frame: np.ndarray) -> tuple[np.ndarray, tuple[int, int] | Non
     """Detect blue blobs, draw circles, return annotated frame + largest center."""
     frame = np.ascontiguousarray(frame)
     hsv  = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
-    mask = cv2.inRange(hsv, HSV_LOW, HSV_HIGH)
+    mask = cv2.bitwise_or(
+        cv2.inRange(hsv, HSV_RED_LOW1, HSV_RED_HIGH1),
+        cv2.inRange(hsv, HSV_RED_LOW2, HSV_RED_HIGH2),
+    )
 
     # Clean up mask
     kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
@@ -162,7 +168,7 @@ if __name__ == "__main__":
     import socket
     ip = socket.gethostbyname(socket.gethostname())
     print(f"[blue_tracker] live feed → http://{ip}:{PORT}")
-    print(f"[blue_tracker] tracking #007FFF  HSV range H:{HSV_LOW[0]}-{HSV_HIGH[0]}")
+    print(f"[blue_tracker] tracking red  H:0-10 + H:170-179")
     print("[blue_tracker] Ctrl+C to stop")
     server = HTTPServer(("0.0.0.0", PORT), _Handler)
     try:
