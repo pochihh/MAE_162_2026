@@ -60,7 +60,7 @@ SHOOT_CHANNEL    = 15
 SHOOT_A_DEG      = 95.0   # resting position
 SHOOT_B_DEG      = 170.0  # fired position
 SHOOT_SETTLE_S   = 0.5    # hold time at fired position before returning
-SHOOT_COOLDOWN_S = 3.0    # minimum seconds between shots
+SHOOT_COOLDOWN_S = 2.0    # minimum seconds between shots
 
 # ---------------------------------------------------------------------------
 # Pan servo (CH 16)
@@ -76,21 +76,23 @@ PAN_SCAN_STEP  = 2.0    # deg per tick while scanning (no target)
 # Step-based tracking — one fixed step every STEP_INTERVAL_S
 # ---------------------------------------------------------------------------
 
-STEP_INTERVAL_S  = 0.5  # seconds between correction steps
+STEP_INTERVAL_S  = 0.8  # seconds between correction steps (+0.3 s lag buffer)
 COARSE_THRESH_PX = 100   # px — use coarse step when error exceeds this
 
 PAN_STEP_COARSE  = 5.0   # deg per step when error > COARSE_THRESH_PX
 PAN_STEP_FINE    = 0.9   # deg per step when 15 px < error <= COARSE_THRESH_PX
-CENTER_TOL_PX    = 5     # px — dead-zone; no step taken within this of centre
-AIM_OFFSET_PX    = 8   # aim this many px above the detected target centre
+CENTER_TOL_PX    = 7     # px — dead-zone; no step taken within this of centre
+AIM_OFFSET_PX    = 2   # aim this many px above the detected target centre
 
-# Sub-step dither — alternates a 5 µs nudge with a 4.88 µs retrace so the
-# servo creeps in sub-PWM-step increments (~0.022°/cycle) when nearly centred.
-_US_PER_DEG          = 1000.0 / 180.0       # µs per degree (1000 µs servo span)
-PAN_DITHER_THRESH_PX = 15                    # px — enter dither below this error
-PAN_DITHER_FWD_DEG   = 5.00 / _US_PER_DEG  # ≈ 0.900° forward nudge
-PAN_DITHER_BACK_DEG  = 4.88 / _US_PER_DEG  # ≈ 0.878° retrace (one PWM step back)
-# net per full dither cycle: 0.12 µs ≈ 0.022° of corrective movement
+# Sub-step dither — alternates a forward nudge with a smaller retrace, with a
+# 0.3 s rest between each step, so the servo creeps toward centre.
+_US_PER_DEG          = 1000.0 / 180.0      # µs per degree (1000 µs servo span)
+PAN_DITHER_THRESH_PX = 15                   # px — enter dither below this error
+PAN_DITHER_FWD_DEG   = 13.5 / _US_PER_DEG # ≈ 2.430° forward nudge  (-10%)
+PAN_DITHER_BACK_DEG  = 11.7 / _US_PER_DEG # ≈ 2.106° retrace         (-10%)
+PAN_DITHER_REST_S    = 0.6                 # pause between each dither step (+0.3 s lag buffer)
+PAN_LOCK_CHECK_S     = 0.5                 # full freeze after entering dead-zone
+# net per full dither cycle: 1.8 µs ≈ 0.324° toward centre
 
 PITCH_MOTOR = 3
 PITCH_PWM   = 200
@@ -202,6 +204,7 @@ def _annotate(
     pan_deg: float,
     pitch_pwm: int,
     state: str,
+    pan_mode: str = "",
 ) -> np.ndarray:
     out   = frame.copy()
     fcx   = _CAM_WIDTH  // 2
@@ -231,6 +234,9 @@ def _annotate(
                 cv2.FONT_HERSHEY_SIMPLEX, 0.6, _RED, 2, cv2.LINE_AA)
     cv2.putText(out, f"pan {pan_deg:.1f}deg   pitch {pitch_pwm:+d} pwm",
                 (8, 44), cv2.FONT_HERSHEY_SIMPLEX, 0.45, _RED, 1, cv2.LINE_AA)
+    if pan_mode:
+        cv2.putText(out, f"pan step: {pan_mode}",
+                    (8, 90), cv2.FONT_HERSHEY_SIMPLEX, 0.5, _RED, 2, cv2.LINE_AA)
     return out
 
 
@@ -304,7 +310,22 @@ def run(robot: Robot) -> None:
     # Enable hardware
     robot.enable_servo(PAN_CHANNEL)
     robot.enable_servo(SHOOT_CHANNEL)
-    robot.enable_motor(PITCH_MOTOR, DCMotorMode.PWM)
+
+    # enable_motor publishes to /dc_enable which may not have a matched
+    # subscriber yet even after dc_state is non-None (state and command are
+    # separate topics). Retry until the bridge reflects the mode change.
+    _m3_deadline = time.monotonic() + 8.0
+    print(f"[track] enabling M{PITCH_MOTOR} (PWM)…")
+    while True:
+        robot.enable_motor(PITCH_MOTOR, DCMotorMode.PWM)
+        time.sleep(0.1)
+        dc = robot.get_dc_state()
+        if dc is not None and dc.motors[PITCH_MOTOR - 1].mode == int(DCMotorMode.PWM):
+            print(f"[track] M{PITCH_MOTOR} enabled")
+            break
+        if time.monotonic() > _m3_deadline:
+            print(f"[track] WARNING: M{PITCH_MOTOR} enable not confirmed — proceeding anyway")
+            break
 
     pan_deg            = PAN_CENTER_DEG
     pitch_pwm          = 0
@@ -319,7 +340,11 @@ def run(robot: Robot) -> None:
     last_step_at      = 0.0
     last_shot_at      = -SHOOT_COOLDOWN_S
     shooting          = False
-    pan_dither_phase  = False  # False=forward nudge next, True=retrace next
+    pan_dither_phase   = False  # False=forward nudge next, True=retrace next
+    pan_dither_dir     = 0.0   # sign of pan_err captured at forward-nudge time
+    pan_dither_next_at  = 0.0   # earliest time the next dither step may fire
+    pan_lock_check_until = 0.0  # all pan movement frozen until this time
+    pan_mode            = "SCAN"
     locked_pos: tuple[int, int] | None = None
     centred_since: float | None = None
 
@@ -376,7 +401,7 @@ def run(robot: Robot) -> None:
                 if centred and not shooting:
                     if centred_since is None:
                         centred_since = now
-                    elif now - centred_since >= 1.0 and now - last_shot_at >= SHOOT_COOLDOWN_S:
+                    elif now - centred_since >= 0.5 and now - last_shot_at >= SHOOT_COOLDOWN_S:
                         centred_since = None
                         shooting      = True
                         last_shot_at  = now
@@ -392,27 +417,49 @@ def run(robot: Robot) -> None:
                 else:
                     centred_since = None
 
-                # Pan: step-based — hold pan still while shooting
-                if not shooting and now - last_step_at >= STEP_INTERVAL_S:
+                # Pan: all movement frozen during lock-check window
+                if not shooting and now >= pan_lock_check_until:
                     if abs(pan_err) > CENTER_TOL_PX:
                         if abs(pan_err) > PAN_DITHER_THRESH_PX:
-                            # Coarse or fine step — reset dither phase on exit
-                            step = PAN_STEP_COARSE if abs(pan_err) > COARSE_THRESH_PX else PAN_STEP_FINE
-                            correction = -math.copysign(step, pan_err)
-                            pan_dither_phase = False
+                            # Coarse or fine step
+                            if now - last_step_at >= STEP_INTERVAL_S:
+                                step = PAN_STEP_COARSE if abs(pan_err) > COARSE_THRESH_PX else PAN_STEP_FINE
+                                pan_mode = "COARSE" if abs(pan_err) > COARSE_THRESH_PX else "FINE"
+                                correction = -math.copysign(step, pan_err)
+                                pan_dither_phase = False
+                                pan_deg = float(np.clip(
+                                    pan_deg + correction, PAN_MIN_DEG, PAN_MAX_DEG,
+                                ))
+                                robot.set_servo(PAN_CHANNEL, pan_deg)
+                                last_step_at = now
                         else:
-                            # Sub-step dither: 5 µs forward then 4.88 µs back
-                            # net per cycle ≈ 0.022° of corrective movement
-                            if not pan_dither_phase:
-                                correction = -math.copysign(PAN_DITHER_FWD_DEG, pan_err)
-                            else:
-                                correction = math.copysign(PAN_DITHER_BACK_DEG, pan_err)
-                            pan_dither_phase = not pan_dither_phase
-                        pan_deg = float(np.clip(
-                            pan_deg + correction, PAN_MIN_DEG, PAN_MAX_DEG,
-                        ))
-                        robot.set_servo(PAN_CHANNEL, pan_deg)
-                        last_step_at = now
+                            # Dither: own 0.3 s rest between each step
+                            if now >= pan_dither_next_at:
+                                if not pan_dither_phase:
+                                    # Capture direction; always nudge toward centre
+                                    pan_dither_dir = math.copysign(1.0, pan_err)
+                                    correction = -pan_dither_dir * PAN_DITHER_FWD_DEG
+                                    pan_mode = "DITHER-F"
+                                else:
+                                    # Retrace with locked direction; skip if already centred
+                                    correction = (
+                                        0.0 if abs(pan_err) <= CENTER_TOL_PX
+                                        else pan_dither_dir * PAN_DITHER_BACK_DEG
+                                    )
+                                    pan_mode = "DITHER-B"
+                                pan_dither_phase = not pan_dither_phase
+                                pan_dither_next_at = now + PAN_DITHER_REST_S
+                                pan_deg = float(np.clip(
+                                    pan_deg + correction, PAN_MIN_DEG, PAN_MAX_DEG,
+                                ))
+                                robot.set_servo(PAN_CHANNEL, pan_deg)
+                    else:
+                        # Pan centred — freeze ALL pan movement for PAN_LOCK_CHECK_S.
+                        # Reset dither so if it drifts out the next step goes toward
+                        # centre, not away. centred_since accumulates undisturbed.
+                        pan_dither_phase    = False
+                        pan_lock_check_until = now + PAN_LOCK_CHECK_S
+                        pan_mode = "LOCK-CHK"
 
                 # Pitch: pulse-based — hold still while shooting
                 if not shooting and abs(pitch_err) > CENTER_TOL_PX:
@@ -431,6 +478,7 @@ def run(robot: Robot) -> None:
 
             else:
                 state              = "SCAN"
+                pan_mode           = "SCAN"
                 smooth_tx          = None
                 smooth_ty          = None
                 pitch_pulse_end_at = 0.0
@@ -457,7 +505,7 @@ def run(robot: Robot) -> None:
 
 
             # Encode annotated frame for stream
-            ann = _annotate(frame, detection, pan_deg, pitch_pwm, state)
+            ann = _annotate(frame, detection, pan_deg, pitch_pwm, state, pan_mode)
             _, buf = cv2.imencode(".jpg", ann, [cv2.IMWRITE_JPEG_QUALITY, 75])
             with _jpeg_lock:
                 _latest_jpeg = buf.tobytes()
