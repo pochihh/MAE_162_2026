@@ -60,9 +60,13 @@ LAPF_ATTRACTION_GAIN = 3.0     # was 1.0; 3× boost to help pull through initial
 LAPF_EMA_ALPHA       = 0.35
 LAPF_MAX_S           = 55.0    # fallback: leave SEG2 after this many seconds even if goal not reached
 
+# ---------------------------------------------------------------------------
+# FSM timing and start triggers
+# ---------------------------------------------------------------------------
+
 STATUS_INTERVAL_S    = 0.5
-BTN3_HOLD_TICKS      = 10   # ~0.2 s at 50 Hz — ignore glitches shorter than this
-GREEN_HOLD_TICKS     = 10   # same hold before green-light trigger fires
+BTN3_HOLD_TICKS      = 10   # ~0.2 s at 50 Hz — debounce glitches shorter than this
+GREEN_HOLD_TICKS     = 10   # same hold required before green-light trigger fires
 GREEN_MIN_CONFIDENCE = 0.30 # must match vision_node confidence_threshold in run_robot.sh
 
 # ---------------------------------------------------------------------------
@@ -99,8 +103,7 @@ GPS_TAG_ID            = 13     # ArUco tag ID to track (-1 = accept any tag)
 # ---------------------------------------------------------------------------
 
 # Segment 1: start → entry of cone corridor
-# Last approach is from below (y=0 → y=305) so the robot arrives facing +Y,
-# aligned with the LAPF corridor direction.
+
 PATH_SEG1_CTRL = [
     (   0.0,    0.0),
     (   0.0, 3350.0),
@@ -117,15 +120,10 @@ PATH_SEG1_CTRL = [
 def _seg3_measure_wall(
     robot_pts: list[tuple[float, float]],
 ) -> tuple[float | None, float, float]:
-    """
-    Measure the left wall in robot frame (+x=forward, +y=left).
-
-    Returns:
-        perp_dist_mm: median y of left-wall points (perpendicular wall distance), or None
-        wall_slope_deg: wall line slope angle in deg
-                        (+) wall moving away ahead → robot heading right of corridor → steer left
-                        (–) wall closing ahead  → robot heading left of corridor → steer right
-        fwd_min_mm: minimum range in forward ±25° cone (for speed throttle)
+    """Return (perp_dist_mm, wall_slope_deg, fwd_min_mm) from left-wall lidar points.
+    perp_dist_mm: perpendicular distance to left wall, or None if too few points.
+    wall_slope_deg: +ve = wall diverging ahead (steer left), -ve = converging (steer right).
+    fwd_min_mm: nearest obstacle in forward ±25° cone, used to throttle speed.
     """
     left_lo  = math.radians(50.0)
     left_hi  = math.radians(130.0)
@@ -159,14 +157,13 @@ def _seg3_measure_wall(
         slope = float(slope)
         intercept = float(intercept)
 
-    # True perpendicular distance from robot (at origin) to the wall line y = slope*x + intercept
     perp_dist = abs(intercept) / math.sqrt(slope ** 2 + 1.0)
 
     return perp_dist, math.degrees(math.atan(slope)), fwd_min
 
 
 # ---------------------------------------------------------------------------
-# Helpers
+# Setup and navigation helpers
 # ---------------------------------------------------------------------------
 
 def configure_robot(robot: Robot) -> None:
@@ -366,7 +363,7 @@ def _run(robot: Robot) -> None:
     while True:
         now = time.monotonic()
 
-        # ------------------------------------------------------------------
+        # ── IDLE: wait for green light or BTN3 hold ───────────────────────
         if state == "IDLE":
             show_idle_leds(robot)
 
@@ -418,7 +415,7 @@ def _run(robot: Robot) -> None:
                 green_hold_count = 0
                 state = "PP_SEG1"
 
-        # ------------------------------------------------------------------
+        # ── PP_SEG1: pure pursuit to cone corridor entry ───────────────────
         elif state == "PP_SEG1":
             if now - last_status_at >= STATUS_INTERVAL_S:
                 print_status(robot, "PP_SEG1")
@@ -439,7 +436,7 @@ def _run(robot: Robot) -> None:
                 print("[FSM] visualiser → ros2_ws/runtime_output/lidar_viz.png")
                 state = "LAPF_SEG2"
 
-        # ------------------------------------------------------------------
+        # ── LAPF_SEG2: potential-field cone avoidance ─────────────────────
         elif state == "LAPF_SEG2":
             if now - last_status_at >= STATUS_INTERVAL_S:
                 x, y, theta = robot.get_pose()
@@ -451,7 +448,6 @@ def _run(robot: Robot) -> None:
                 pose_src  = "fused" if robot.has_fused_pose() else "odom"
                 gps_str   = "GPS:on" if robot.is_gps_active() else "GPS:off"
                 remaining = ((LAPF_GOAL_X_MM - x) ** 2 + (LAPF_GOAL_Y_MM - y) ** 2) ** 0.5
-                # Nearest confirmed obstacle and its distance from robot
                 if confirmed:
                     nearest = min(confirmed, key=lambda o: math.hypot(o["x"] - x, o["y"] - y))
                     nd = math.hypot(nearest["x"] - x, nearest["y"] - y)
@@ -481,7 +477,7 @@ def _run(robot: Robot) -> None:
                 show_moving_leds(robot)
                 state = "SEG3_EAST"
 
-        # ------------------------------------------------------------------
+        # ── SEG3_EAST: wall-follow east until corner ──────────────────────
         elif state == "SEG3_EAST":
             raw_pts = robot.get_obstacles()
             perp_dist, wall_slope_deg, fwd_min = _seg3_measure_wall(raw_pts)
@@ -512,7 +508,7 @@ def _run(robot: Robot) -> None:
                       f"  east={east_travel:.0f}mm (need {SEG3_EAST_MIN_TRAVEL_MM:.0f} before corner)")
                 last_status_at = now
 
-        # ------------------------------------------------------------------
+        # ── SEG3_SOUTH: wall-follow south to finish ───────────────────────
         elif state == "SEG3_SOUTH":
             x, y, theta_deg = robot.get_pose()
             dist_traveled = math.hypot(x - seg3_south_start[0], y - seg3_south_start[1])
@@ -550,7 +546,7 @@ def _run(robot: Robot) -> None:
                           f"  dist={dist_traveled:.0f}/{SEG3_SOUTH_DIST_MM:.0f}mm  [open — coasting straight]")
                     last_status_at = now
 
-        # ------------------------------------------------------------------
+        # ── BTN_2: emergency stop (checked every tick) ────────────────────
         if robot.get_button(Button.BTN_2):
             robot.stop()
             if viz is not None:

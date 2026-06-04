@@ -76,13 +76,21 @@ PAN_SCAN_STEP  = 2.0    # deg per tick while scanning (no target)
 # Step-based tracking — one fixed step every STEP_INTERVAL_S
 # ---------------------------------------------------------------------------
 
-STEP_INTERVAL_S  = 0.16  # seconds between correction steps
+STEP_INTERVAL_S  = 0.5  # seconds between correction steps
 COARSE_THRESH_PX = 100   # px — use coarse step when error exceeds this
 
 PAN_STEP_COARSE  = 5.0   # deg per step when error > COARSE_THRESH_PX
-PAN_STEP_FINE    = 0.05    # deg per step when error <= COARSE_THRESH_PX
-CENTER_TOL_PX    = 3   # px — no step taken when within this of centre
-AIM_OFFSET_PX    = 12   # aim this many px below the detected target centre
+PAN_STEP_FINE    = 0.9   # deg per step when 15 px < error <= COARSE_THRESH_PX
+CENTER_TOL_PX    = 5     # px — dead-zone; no step taken within this of centre
+AIM_OFFSET_PX    = 8   # aim this many px above the detected target centre
+
+# Sub-step dither — alternates a 5 µs nudge with a 4.88 µs retrace so the
+# servo creeps in sub-PWM-step increments (~0.022°/cycle) when nearly centred.
+_US_PER_DEG          = 1000.0 / 180.0       # µs per degree (1000 µs servo span)
+PAN_DITHER_THRESH_PX = 15                    # px — enter dither below this error
+PAN_DITHER_FWD_DEG   = 5.00 / _US_PER_DEG  # ≈ 0.900° forward nudge
+PAN_DITHER_BACK_DEG  = 4.88 / _US_PER_DEG  # ≈ 0.878° retrace (one PWM step back)
+# net per full dither cycle: 0.12 µs ≈ 0.022° of corrective movement
 
 PITCH_MOTOR = 3
 PITCH_PWM   = 200
@@ -203,20 +211,26 @@ def _annotate(
     cv2.drawMarker(out, (fcx, fcy), (255, 255, 255),
                    cv2.MARKER_CROSS, markerSize=24, thickness=1)
 
+    _RED = (0, 0, 255)
+
     if detection:
         tx, ty, r = detection
+        dx   = tx - fcx
+        dy   = ty - fcy
+        dist = math.hypot(dx, dy)
         cv2.circle(out, (tx, ty), r, (0, 255, 0), 2)
         cv2.drawMarker(out, (tx, ty), (0, 255, 0),
                        cv2.MARKER_CROSS, markerSize=14, thickness=2)
         cv2.line(out, (fcx, fcy), (tx, ty), (0, 200, 0), 1)
         cv2.putText(out, f"({tx},{ty})", (tx + r + 4, ty),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 255, 0), 1, cv2.LINE_AA)
+        cv2.putText(out, f"dx:{dx:+d}  dy:{dy:+d}  dist:{dist:.1f}px",
+                    (8, 68), cv2.FONT_HERSHEY_SIMPLEX, 0.5, _RED, 2, cv2.LINE_AA)
 
     cv2.putText(out, f"[{state}]", (8, 22),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 220, 255), 2, cv2.LINE_AA)
+                cv2.FONT_HERSHEY_SIMPLEX, 0.6, _RED, 2, cv2.LINE_AA)
     cv2.putText(out, f"pan {pan_deg:.1f}deg   pitch {pitch_pwm:+d} pwm",
-                (8, 44), cv2.FONT_HERSHEY_SIMPLEX, 0.45,
-                (200, 200, 200), 1, cv2.LINE_AA)
+                (8, 44), cv2.FONT_HERSHEY_SIMPLEX, 0.45, _RED, 1, cv2.LINE_AA)
     return out
 
 
@@ -302,9 +316,10 @@ def run(robot: Robot) -> None:
     pitch_pulse_end_at = 0.0
     smooth_tx: float | None = None
     smooth_ty: float | None = None
-    last_step_at  = 0.0
-    last_shot_at  = -SHOOT_COOLDOWN_S
-    shooting      = False
+    last_step_at      = 0.0
+    last_shot_at      = -SHOOT_COOLDOWN_S
+    shooting          = False
+    pan_dither_phase  = False  # False=forward nudge next, True=retrace next
     locked_pos: tuple[int, int] | None = None
     centred_since: float | None = None
 
@@ -380,10 +395,21 @@ def run(robot: Robot) -> None:
                 # Pan: step-based — hold pan still while shooting
                 if not shooting and now - last_step_at >= STEP_INTERVAL_S:
                     if abs(pan_err) > CENTER_TOL_PX:
-                        pan_step = PAN_STEP_COARSE if abs(pan_err) > COARSE_THRESH_PX else PAN_STEP_FINE
+                        if abs(pan_err) > PAN_DITHER_THRESH_PX:
+                            # Coarse or fine step — reset dither phase on exit
+                            step = PAN_STEP_COARSE if abs(pan_err) > COARSE_THRESH_PX else PAN_STEP_FINE
+                            correction = -math.copysign(step, pan_err)
+                            pan_dither_phase = False
+                        else:
+                            # Sub-step dither: 5 µs forward then 4.88 µs back
+                            # net per cycle ≈ 0.022° of corrective movement
+                            if not pan_dither_phase:
+                                correction = -math.copysign(PAN_DITHER_FWD_DEG, pan_err)
+                            else:
+                                correction = math.copysign(PAN_DITHER_BACK_DEG, pan_err)
+                            pan_dither_phase = not pan_dither_phase
                         pan_deg = float(np.clip(
-                            pan_deg - math.copysign(pan_step, pan_err),
-                            PAN_MIN_DEG, PAN_MAX_DEG,
+                            pan_deg + correction, PAN_MIN_DEG, PAN_MAX_DEG,
                         ))
                         robot.set_servo(PAN_CHANNEL, pan_deg)
                         last_step_at = now
