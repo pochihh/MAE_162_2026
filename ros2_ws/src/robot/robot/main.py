@@ -1,12 +1,16 @@
 from __future__ import annotations
 import math
+import os
+import subprocess
+import threading
 import time
 
+import cv2
 import numpy as np
 
 from robot.robot import FirmwareState, Robot, Unit
 from robot.hardware_map import (
-    Button, DEFAULT_FSM_HZ, LED, Motor,
+    Button, DCMotorMode, DEFAULT_FSM_HZ, LED, Motor,
     LIDAR_FOV_DEG, LIDAR_MOUNT_THETA_DEG,
     LIDAR_MOUNT_X_MM, LIDAR_MOUNT_Y_MM,
     LIDAR_RANGE_MAX_MM, LIDAR_RANGE_MIN_MM,
@@ -20,7 +24,7 @@ from robot.examples.lidar_viz import LidarViz
 
 POSITION_UNIT        = Unit.MM
 WHEEL_DIAMETER       = 78.0
-WHEEL_BASE           = 321.0
+WHEEL_BASE           = 317.0
 INITIAL_THETA_DEG    = 90.0
 
 LEFT_WHEEL_MOTOR         = Motor.DC_M2
@@ -88,8 +92,8 @@ SEG3_K_LATERAL           = 0.08   # deg/s per mm of lateral error from target
 SEG3_LEFT_TARGET_MM      = 280.0  # 560mm corridor / 2 = centre
 SEG3_CORNER_MM           = 280.0  # turn south when forward obstacle < this (end of east leg)
 SEG3_EAST_MIN_TRAVEL_MM  = 700.0  # must travel this far east before corner detection is allowed
-SEG3_SOUTH_DIST_MM       = 3000.0 # total odometry distance in south leg before done
-SEG3_SOUTH_WALL_MM       = 2600.0 # walls end here — coast straight for the remaining distance
+SEG3_SOUTH_DIST_MM       = 3100.0 # total odometry distance in south leg before done
+SEG3_SOUTH_WALL_MM       = 2300.0 # walls end here — coast straight for the remaining distance
 
 # ---------------------------------------------------------------------------
 # GPS position fusion
@@ -97,6 +101,66 @@ SEG3_SOUTH_WALL_MM       = 2600.0 # walls end here — coast straight for the re
 
 POSITION_FUSION_ALPHA = 0.0   # GPS weight for complementary filter (0–1)
 GPS_TAG_ID            = 13     # ArUco tag ID to track (-1 = accept any tag)
+
+# ---------------------------------------------------------------------------
+# Camera tracking (SEG4) — constants
+# ---------------------------------------------------------------------------
+
+_CAM_DEVICE  = "/dev/video10"
+_CAM_WIDTH   = 640
+_CAM_HEIGHT  = 480
+_CAM_FPS     = 30
+_FRAME_BYTES = _CAM_WIDTH * _CAM_HEIGHT * 3
+
+_HSV_RED_LOW1  = np.array([159, 131,  99], dtype=np.uint8)
+_HSV_RED_HIGH1 = np.array([179, 255, 255], dtype=np.uint8)
+_HSV_RED_LOW2  = np.array([  0, 131,  99], dtype=np.uint8)
+_HSV_RED_HIGH2 = np.array([ 11, 255, 255], dtype=np.uint8)
+_MIN_BLOB_AREA = 500
+
+SHOOT_CHANNEL    = 15
+SHOOT_A_DEG      = 95.0
+SHOOT_B_DEG      = 170.0
+SHOOT_SETTLE_S   = 0.5
+SHOOT_COOLDOWN_S = 2.0
+
+PAN_CHANNEL    = 16
+PAN_CENTER_DEG = 90.0
+PAN_MIN_DEG    = 0.0
+PAN_MAX_DEG    = 180.0
+PAN_SCAN_STEP  = 2.0
+
+STEP_INTERVAL_S  = 0.8
+COARSE_THRESH_PX = 100
+PAN_STEP_COARSE  = 5.0
+PAN_STEP_FINE    = 0.9
+CENTER_TOL_PX    = 15
+AIM_OFFSET_PX    = 2
+
+_US_PER_DEG          = 1000.0 / 180.0
+PAN_DITHER_THRESH_PX = 15
+PAN_DITHER_FWD_DEG   = 13.5 / _US_PER_DEG
+PAN_DITHER_BACK_DEG  = 11.7 / _US_PER_DEG
+PAN_DITHER_REST_S    = 0.6
+PAN_LOCK_CHECK_S     = 0.5
+
+PITCH_MOTOR            = 3
+PITCH_PWM              = 200
+PITCH_STEP_INTERVAL_S  = 0.8
+PITCH_COARSE_THRESH_PX = 50
+PITCH_PULSE_COARSE_S   = 0.18
+PITCH_PULSE_FINE_S     = 0.012
+PITCH_SCAN_PWM         = 80
+PITCH_SCAN_HALF_S      = 1.5
+
+CAM_ALPHA   = 1.2
+CAM_BETA    = 10
+_TARGET_EMA = 0.35
+
+CAMERA_TRACK_WAIT_S = 10.0   # pause after SEG3_SOUTH before tracking begins
+
+_frame_lock   = threading.Lock()
+_latest_frame: np.ndarray | None = None
 
 # ---------------------------------------------------------------------------
 # Map path — split at cone corridor boundaries
@@ -111,6 +175,56 @@ PATH_SEG1_CTRL = [
     ( 580.0,  450.0),
     (1525.0,  450.0),
 ]
+
+
+# ---------------------------------------------------------------------------
+# Camera helpers
+# ---------------------------------------------------------------------------
+
+def _camera_thread() -> None:
+    global _latest_frame
+    cmd = [
+        "ffmpeg", "-loglevel", "quiet",
+        "-f", "v4l2", "-input_format", "yuyv422",
+        "-video_size", f"{_CAM_WIDTH}x{_CAM_HEIGHT}",
+        "-framerate", str(_CAM_FPS),
+        "-i", _CAM_DEVICE,
+        "-f", "rawvideo", "-pix_fmt", "bgr24", "-",
+    ]
+    while True:
+        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE)
+        print("[cam] ffmpeg started")
+        while True:
+            raw = proc.stdout.read(_FRAME_BYTES)
+            if len(raw) < _FRAME_BYTES:
+                print("[cam] stream ended — restarting…")
+                break
+            frame = np.frombuffer(raw, dtype=np.uint8).reshape(
+                (_CAM_HEIGHT, _CAM_WIDTH, 3)
+            ).copy()
+            frame = cv2.convertScaleAbs(frame, alpha=CAM_ALPHA, beta=CAM_BETA)
+            with _frame_lock:
+                _latest_frame = frame
+
+
+def _detect_target(frame: np.ndarray) -> list[tuple[int, int, int]]:
+    hsv  = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+    mask = cv2.bitwise_or(
+        cv2.inRange(hsv, _HSV_RED_LOW1, _HSV_RED_HIGH1),
+        cv2.inRange(hsv, _HSV_RED_LOW2, _HSV_RED_HIGH2),
+    )
+    k    = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN,  k)
+    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, k)
+    cnts, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    blobs = []
+    for c in cnts:
+        area = cv2.contourArea(c)
+        if area > _MIN_BLOB_AREA:
+            (cx, cy), radius = cv2.minEnclosingCircle(c)
+            blobs.append((int(cx), int(cy), int(radius), area))
+    blobs.sort(key=lambda b: b[3], reverse=True)
+    return [(cx, cy, r) for cx, cy, r, _ in blobs]
 
 
 # ---------------------------------------------------------------------------
@@ -346,13 +460,55 @@ def _run(robot: Robot) -> None:
     print("  BTN_3 = start   BTN_2 = stop")
     print("=" * 60)
 
-    state = "IDLE"
+    _VALID_START_STATES = {
+        "IDLE", "PP_SEG1", "LAPF_SEG2", "SEG3_EAST", "SEG3_SOUTH",
+        "CAMERA_WAIT", "CAMERA_TRACK",
+    }
+    _start_state = os.environ.get("ROBOT_START_STATE", "").strip().upper() or "IDLE"
+    if _start_state not in _VALID_START_STATES:
+        print(f"[FSM] WARNING: unknown ROBOT_START_STATE={_start_state!r} — defaulting to IDLE")
+        _start_state = "IDLE"
+    if _start_state != "IDLE":
+        print(f"[FSM] *** skipping to state: {_start_state} ***")
+
+    state = _start_state
     lapf_handle      = None
     lapf_start_time  = None
     viz              = None
-    seg3_east_start  = (0.0, 0.0)
-    seg3_south_start = (0.0, 0.0)
-    show_idle_leds(robot)
+    seg3_east_start    = (0.0, 0.0)
+    seg3_south_start   = (0.0, 0.0)
+    seg3_coast_heading: float | None = None
+
+    # Camera tracking state (initialised when CAMERA_TRACK is first entered)
+    camera_track_initialized = False
+    camera_wait_start        = 0.0
+    cam_pan_deg              = PAN_CENTER_DEG
+    cam_pitch_pwm            = 0
+    cam_scan_dir             = 1
+    cam_pitch_scan_dir       = 1
+    cam_pitch_scan_start     = 0.0
+    cam_last_pitch_step_at   = 0.0
+    cam_pitch_pulse_end_at   = 0.0
+    cam_smooth_tx: float | None  = None
+    cam_smooth_ty: float | None  = None
+    cam_last_step_at         = 0.0
+    cam_last_shot_at         = 0.0
+    cam_shooting             = False
+    cam_pan_dither_phase     = False
+    cam_pan_dither_dir       = 0.0
+    cam_pan_dither_next_at   = 0.0
+    cam_pan_lock_check_until = 0.0
+    cam_locked_pos: tuple[int, int] | None = None
+    cam_centred_since: float | None        = None
+
+    # When jumping into a camera state, seed the wait timer and LEDs correctly
+    if _start_state == "CAMERA_WAIT":
+        camera_wait_start = time.monotonic()
+        show_idle_leds(robot)
+    elif _start_state == "CAMERA_TRACK":
+        show_moving_leds(robot)
+    else:
+        show_idle_leds(robot)
 
     # BTN_3 start logic: require button seen released, then held for BTN3_HOLD_TICKS
     # consecutive ticks before accepting — guards against firmware-init glitches.
@@ -490,7 +646,8 @@ def _run(robot: Robot) -> None:
                 print(f"[FSM] SEG3_EAST: east wall at {fwd_min:.0f}mm after {east_travel:.0f}mm → turning south")
                 robot.turn_to(270.0, blocking=True, tolerance_deg=5.0, timeout=8.0)
                 x, y, _ = robot.get_pose()
-                seg3_south_start = (x, y)
+                seg3_south_start   = (x, y)
+                seg3_coast_heading = None
                 print(f"[FSM] turned south  south-start=({x:.0f},{y:.0f}) → SEG3_SOUTH")
                 show_moving_leds(robot)
                 state = "SEG3_SOUTH"
@@ -517,12 +674,18 @@ def _run(robot: Robot) -> None:
                 robot.stop()
                 if viz is not None:
                     viz.stop()
+                target_deg = theta_deg + 45.0
+                print(f"[FSM] SEG3_SOUTH done at {dist_traveled:.0f}mm — rotating 45° left to {target_deg:.1f}°")
+                robot.turn_to(target_deg, blocking=True, tolerance_deg=3.0, timeout=8.0)
+                x, y, theta_deg = robot.get_pose()
+                print(f"[FSM] post-south turn done  θ={theta_deg:.1f}°")
                 show_idle_leds(robot)
-                print(f"[FSM] SEG3_SOUTH done at {dist_traveled:.0f}mm — run complete!")
-                print_status(robot, "DONE")
-                return
+                print(f"[FSM] → camera track in {CAMERA_TRACK_WAIT_S:.0f}s")
+                print_status(robot, "SEG3_DONE")
+                camera_wait_start = now
+                state = "CAMERA_WAIT"
 
-            if dist_traveled < SEG3_SOUTH_WALL_MM:
+            elif dist_traveled < SEG3_SOUTH_WALL_MM:
                 raw_pts = robot.get_obstacles()
                 perp_dist, wall_slope_deg, fwd_min = _seg3_measure_wall(raw_pts)
                 if fwd_min < SEG3_STOP_MM:
@@ -540,11 +703,200 @@ def _run(robot: Robot) -> None:
                           f"  wall={pd_str}mm  slope={wall_slope_deg:+.1f}°  fwd={fwd_min:.0f}mm")
                     last_status_at = now
             else:
-                robot.set_velocity(SEG3_MAX_SPEED, 0.0)
+                if seg3_coast_heading is None:
+                    seg3_coast_heading = theta_deg
+                heading_err = seg3_coast_heading - theta_deg
+                angular = max(-SEG3_MAX_ANG_DEG, min(SEG3_MAX_ANG_DEG, 1.5 * heading_err))
+                robot.set_velocity(SEG3_MAX_SPEED, angular)
                 if now - last_status_at >= STATUS_INTERVAL_S:
                     print(f"[SEG3_SOUTH]  pose=({x:.0f},{y:.0f}) θ={theta_deg:.1f}°"
-                          f"  dist={dist_traveled:.0f}/{SEG3_SOUTH_DIST_MM:.0f}mm  [open — coasting straight]")
+                          f"  dist={dist_traveled:.0f}/{SEG3_SOUTH_DIST_MM:.0f}mm"
+                          f"  [coasting  target={seg3_coast_heading:.1f}°  herr={heading_err:+.1f}°]")
                     last_status_at = now
+
+        # ── CAMERA_WAIT: 10-second pause after SEG3 ──────────────────────
+        elif state == "CAMERA_WAIT":
+            if now - last_status_at >= STATUS_INTERVAL_S:
+                remaining = max(0.0, CAMERA_TRACK_WAIT_S - (now - camera_wait_start))
+                print(f"[CAMERA_WAIT] camera track starts in {remaining:.0f}s")
+                last_status_at = now
+            if now - camera_wait_start >= CAMERA_TRACK_WAIT_S:
+                print("[FSM] CAMERA_WAIT done → CAMERA_TRACK")
+                show_moving_leds(robot)
+                state = "CAMERA_TRACK"
+
+        # ── CAMERA_TRACK: red-target tracking with pan servo + pitch motor ─
+        elif state == "CAMERA_TRACK":
+            if not camera_track_initialized:
+                # vision_node holds /dev/video10 — kill it so ffmpeg can open the device
+                print("[track] stopping vision_node to free camera device…")
+                subprocess.run(["pkill", "-f", "vision_node"], check=False)
+                time.sleep(0.5)
+                threading.Thread(target=_camera_thread, daemon=True).start()
+                _bridge_deadline = time.monotonic() + 10.0
+                print("[track] waiting for hardware bridge…")
+                while robot.get_dc_state() is None:
+                    if time.monotonic() > _bridge_deadline:
+                        print("[track] WARNING: bridge not responding — enabling anyway")
+                        break
+                    time.sleep(0.05)
+                robot.enable_servo(PAN_CHANNEL)
+                robot.enable_servo(SHOOT_CHANNEL)
+                _m3_deadline = time.monotonic() + 8.0
+                print(f"[track] enabling M{PITCH_MOTOR} (PWM)…")
+                while True:
+                    robot.enable_motor(PITCH_MOTOR, DCMotorMode.PWM)
+                    time.sleep(0.1)
+                    dc = robot.get_dc_state()
+                    if dc is not None and dc.motors[PITCH_MOTOR - 1].mode == int(DCMotorMode.PWM):
+                        print(f"[track] M{PITCH_MOTOR} enabled")
+                        break
+                    if time.monotonic() > _m3_deadline:
+                        print(f"[track] WARNING: M{PITCH_MOTOR} enable not confirmed — proceeding anyway")
+                        break
+                cam_pan_deg              = PAN_CENTER_DEG
+                cam_pitch_pwm            = 0
+                cam_scan_dir             = 1
+                cam_pitch_scan_dir       = 1
+                cam_pitch_scan_start     = now
+                cam_last_pitch_step_at   = 0.0
+                cam_pitch_pulse_end_at   = 0.0
+                cam_smooth_tx            = None
+                cam_smooth_ty            = None
+                cam_last_step_at         = 0.0
+                cam_last_shot_at         = now - SHOOT_COOLDOWN_S
+                cam_shooting             = False
+                cam_pan_dither_phase     = False
+                cam_pan_dither_dir       = 0.0
+                cam_pan_dither_next_at   = 0.0
+                cam_pan_lock_check_until = 0.0
+                cam_locked_pos           = None
+                cam_centred_since        = None
+                robot.set_servo(PAN_CHANNEL, cam_pan_deg)
+                robot.set_servo(SHOOT_CHANNEL, SHOOT_A_DEG)
+                robot.set_motor_pwm(PITCH_MOTOR, 0)
+                print(f"[track] scanning for red target  pan={cam_pan_deg:.0f}°")
+                camera_track_initialized = True
+                next_tick = time.monotonic()
+
+            with _frame_lock:
+                frame = _latest_frame
+
+            if frame is not None:
+                blobs = _detect_target(frame)
+                detection: tuple[int, int, int] | None = None
+
+                if blobs:
+                    if cam_locked_pos is None:
+                        detection = blobs[0]
+                    else:
+                        lx, ly = cam_locked_pos
+                        detection = min(blobs, key=lambda b: (b[0]-lx)**2 + (b[1]-ly)**2)
+                    cam_locked_pos = (detection[0], detection[1])
+                else:
+                    cam_locked_pos = None
+
+                if detection:
+                    tx, ty, _ = detection
+                    cam_pitch_scan_start = now
+
+                    if cam_smooth_tx is None:
+                        cam_smooth_tx, cam_smooth_ty = float(tx), float(ty)
+                    else:
+                        cam_smooth_tx += _TARGET_EMA * (tx - cam_smooth_tx)
+                        cam_smooth_ty += _TARGET_EMA * (ty - cam_smooth_ty)
+
+                    pan_err   = cam_smooth_tx - (_CAM_WIDTH  // 2)
+                    pitch_err = (cam_smooth_ty - AIM_OFFSET_PX) - (_CAM_HEIGHT // 2)
+
+                    centred = abs(pan_err) <= CENTER_TOL_PX and abs(pitch_err) <= CENTER_TOL_PX
+                    if centred and not cam_shooting:
+                        if cam_centred_since is None:
+                            cam_centred_since = now
+                        elif now - cam_centred_since >= 0.5 and now - cam_last_shot_at >= SHOOT_COOLDOWN_S:
+                            cam_centred_since = None
+                            cam_shooting      = True
+                            cam_last_shot_at  = now
+                            print("[shoot] firing CH15")
+                            def _shoot():
+                                nonlocal cam_shooting
+                                robot.set_servo(SHOOT_CHANNEL, SHOOT_B_DEG)
+                                time.sleep(SHOOT_SETTLE_S)
+                                robot.set_servo(SHOOT_CHANNEL, SHOOT_A_DEG)
+                                cam_shooting = False
+                                print("[shoot] reset CH15")
+                            threading.Thread(target=_shoot, daemon=True).start()
+                    else:
+                        cam_centred_since = None
+
+                    if not cam_shooting and now >= cam_pan_lock_check_until:
+                        if abs(pan_err) > CENTER_TOL_PX:
+                            if abs(pan_err) > PAN_DITHER_THRESH_PX:
+                                if now - cam_last_step_at >= STEP_INTERVAL_S:
+                                    step = PAN_STEP_COARSE if abs(pan_err) > COARSE_THRESH_PX else PAN_STEP_FINE
+                                    correction = -math.copysign(step, pan_err)
+                                    cam_pan_dither_phase = False
+                                    cam_pan_deg = float(np.clip(
+                                        cam_pan_deg + correction, PAN_MIN_DEG, PAN_MAX_DEG,
+                                    ))
+                                    robot.set_servo(PAN_CHANNEL, cam_pan_deg)
+                                    cam_last_step_at = now
+                            else:
+                                if now >= cam_pan_dither_next_at:
+                                    if not cam_pan_dither_phase:
+                                        cam_pan_dither_dir = math.copysign(1.0, pan_err)
+                                        correction = -cam_pan_dither_dir * PAN_DITHER_FWD_DEG
+                                    else:
+                                        correction = (
+                                            0.0 if abs(pan_err) <= CENTER_TOL_PX
+                                            else cam_pan_dither_dir * PAN_DITHER_BACK_DEG
+                                        )
+                                    cam_pan_dither_phase = not cam_pan_dither_phase
+                                    cam_pan_dither_next_at = now + PAN_DITHER_REST_S
+                                    cam_pan_deg = float(np.clip(
+                                        cam_pan_deg + correction, PAN_MIN_DEG, PAN_MAX_DEG,
+                                    ))
+                                    robot.set_servo(PAN_CHANNEL, cam_pan_deg)
+                        else:
+                            cam_pan_dither_phase     = False
+                            cam_pan_lock_check_until = now + PAN_LOCK_CHECK_S
+
+                    if not cam_shooting and abs(pitch_err) > CENTER_TOL_PX:
+                        if now < cam_pitch_pulse_end_at:
+                            cam_pitch_pwm = int(math.copysign(PITCH_PWM, pitch_err))
+                        elif now - cam_last_pitch_step_at >= PITCH_STEP_INTERVAL_S:
+                            dur = PITCH_PULSE_COARSE_S if abs(pitch_err) > PITCH_COARSE_THRESH_PX else PITCH_PULSE_FINE_S
+                            cam_pitch_pulse_end_at = now + dur
+                            cam_last_pitch_step_at = now
+                            cam_pitch_pwm = int(math.copysign(PITCH_PWM, pitch_err))
+                        else:
+                            cam_pitch_pwm = 0
+                    else:
+                        cam_pitch_pwm = 0
+                    robot.set_motor_pwm(PITCH_MOTOR, cam_pitch_pwm)
+
+                else:
+                    cam_smooth_tx          = None
+                    cam_smooth_ty          = None
+                    cam_pitch_pulse_end_at = 0.0
+                    cam_locked_pos         = None
+
+                    if now - cam_last_step_at >= STEP_INTERVAL_S:
+                        cam_pan_deg += cam_scan_dir * PAN_SCAN_STEP
+                        if cam_pan_deg >= PAN_MAX_DEG:
+                            cam_pan_deg  = PAN_MAX_DEG
+                            cam_scan_dir = -1
+                        elif cam_pan_deg <= PAN_MIN_DEG:
+                            cam_pan_deg  = PAN_MIN_DEG
+                            cam_scan_dir = 1
+                        robot.set_servo(PAN_CHANNEL, cam_pan_deg)
+                        cam_last_step_at = now
+
+                    if now - cam_pitch_scan_start >= PITCH_SCAN_HALF_S:
+                        cam_pitch_scan_dir   = -cam_pitch_scan_dir
+                        cam_pitch_scan_start = now
+                    cam_pitch_pwm = cam_pitch_scan_dir * PITCH_SCAN_PWM
+                    robot.set_motor_pwm(PITCH_MOTOR, cam_pitch_pwm)
 
         # ── BTN_2: emergency stop (checked every tick) ────────────────────
         if robot.get_button(Button.BTN_2):

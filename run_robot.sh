@@ -1,9 +1,31 @@
 #!/usr/bin/env bash
 # Ensure all required ROS2 nodes are running cleanly, then start the robot FSM.
+#
+# Usage: ./run_robot.sh [--state <STATE>]
+#   --state / -s   Skip directly to FSM state on startup.
+#                  Valid: IDLE PP_SEG1 LAPF_SEG2 SEG3_EAST SEG3_SOUTH
+#                         CAMERA_WAIT CAMERA_TRACK
+#   Example: ./run_robot.sh --state CAMERA_TRACK
 set -e
 
 CONTAINER="docker-ros2_runtime-1"
 ROS_SETUP="source /opt/ros/jazzy/setup.bash && source /ros2_ws/install/setup.bash"
+
+# ── Parse arguments ───────────────────────────────────────────────────────────
+START_STATE=""
+while [[ "$#" -gt 0 ]]; do
+    case "$1" in
+        --state|-s)
+            START_STATE="${2:?--state requires a value}"
+            shift 2
+            ;;
+        *)
+            echo "Unknown argument: $1" >&2
+            echo "Usage: $0 [--state <STATE>]" >&2
+            exit 1
+            ;;
+    esac
+done
 
 _exec() { docker exec "$CONTAINER" bash -c "$*"; }
 
@@ -49,17 +71,14 @@ else
     echo "[2/6] rplidar already running — OK"
 fi
 
-# ── 3. Ensure vision_node is running ─────────────────────────────────────────
-echo "[3/6] checking vision_node..."
-VISION_RUNNING=$(_exec "ps aux | grep '[v]ision_node' | grep -v grep | wc -l")
-if [ "$VISION_RUNNING" -eq 0 ]; then
-    echo "[3/6] starting vision_node..."
-    _exec "$ROS_SETUP && nohup ros2 run vision vision_node \
-        --ros-args -p confidence_threshold:=0.10 > /tmp/vision.log 2>&1 &"
-    sleep 1
-else
-    echo "[3/6] vision_node already running — OK"
-fi
+# ── 3. Restart vision_node fresh every run ───────────────────────────────────
+echo "[3/6] restarting vision_node..."
+_exec "kill -9 \$(ps aux | grep '[v]ision_node' | awk '{print \$2}') 2>/dev/null; true"
+sleep 0.5
+_exec "$ROS_SETUP && nohup ros2 run vision vision_node \
+    --ros-args -p confidence_threshold:=0.10 > /tmp/vision.log 2>&1 &"
+sleep 1
+echo "[3/6] vision_node started"
 
 # ── 4. Ensure robot_gps (ArUco GPS → /tag_detections) is running ─────────────
 # Connects to Jetson at 192.168.8.120:7777 over TCP.
@@ -87,5 +106,7 @@ sleep 1
 # ── 6. Start robot FSM ───────────────────────────────────────────────────────
 echo "[6/6] starting robot node..."
 FSM_ENV=""
-[ -n "$ROBOT_FSM_MODULE" ] && FSM_ENV="ROBOT_FSM_MODULE=$ROBOT_FSM_MODULE"
+[ -n "$ROBOT_FSM_MODULE" ] && FSM_ENV="$FSM_ENV ROBOT_FSM_MODULE=$ROBOT_FSM_MODULE"
+[ -n "$START_STATE"      ] && FSM_ENV="$FSM_ENV ROBOT_START_STATE=$START_STATE" && \
+    echo "[6/6] *** start state override: $START_STATE ***"
 _exec "$ROS_SETUP && $FSM_ENV ros2 run robot robot"
