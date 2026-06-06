@@ -106,47 +106,50 @@ elif MODE == "helpers":
 # Multiple tasks
 # =============================================================================
 
-elif MODE == "manip_nav":
+elif MODE == "FINAL":
     tasks = [
         {
             "state": "HOME"
+        },
+        {
+            "state": "WAIT", "trigger": "green_light"
         },
         {
             "state": "NAV",
             "path_planner": "pp",
             "vision": "burger_bun",
             "waypoints": cp.WP_BURGER_BUN_1, 
-            # "goal_heading": 180.0
+            "goal_heading": 170.0
         },
-        # {
-        #     "state": "MANIP",
-        #     "command": "pick",
-        #     "ingredient": "bun"
-        # },
+        {
+            "state": "MANIP",
+            "command": "pick",
+            "ingredient": "bun"
+        },
         {
             "state": "NAV",
             "path_planner": "pp",
             "vision": "burger_patty",
             "waypoints": cp.WP_BURGER_PATTY,
-            # "goal_heading": 180.0
+            "goal_heading": 180.0
         },
-        # {
-        #     "state": "MANIP",
-        #     "command": "pick",
-        #     "ingredient": "patty"
-        # },
+        {
+            "state": "MANIP",
+            "command": "pick",
+            "ingredient": "patty"
+        },
         {
             "state": "NAV",
             "path_planner": "pp",
             "vision": "burger_bun",
             "waypoints": cp.WP_BURGER_BUN_2,
-            # "goal_heading": 180.0
+            "goal_heading": 180.0
         },
-        # {
-        #     "state": "MANIP", 
-        #     "command": "pick", 
-        #     "ingredient": "bun"
-        # },
+        {
+            "state": "MANIP", 
+            "command": "pick", 
+            "ingredient": "bun"
+        },
         {
             "state": "NAV", 
             "path_planner": "pp", 
@@ -168,9 +171,9 @@ elif MODE == "manip_nav":
             "waypoints": [cp.WP5],
             "goal_heading": 0.0
         },
-        # {
-        #     "state": "MANIP", "command": "place"
-        # }
+        {
+            "state": "MANIP", "command": "place"
+        }
     ]
 
 elif MODE == "LAPF_TO_IDENT":
@@ -195,23 +198,4 @@ elif MODE == "TEST_NAV":
         {"state": "NAV", "path_planner": "pp", "vision": "customer", "waypoints": [cp.WP5, cp.WP_CUSTOMER_1]},
         {"state": "NAV", "path_planner": "pp", "vision": "stop_sign", "waypoints": cp.WP_STOP_SIGN},
         {"state": "NAV", "path_planner": "pp", "waypoints": cp.WP6}
-    ]
-
-elif MODE == "FINAL":
-    tasks = [
-        {"state": "WAIT", "trigger": "green_light"},
-        {"state": "NAV", "path_planner": "pp", "vision": "burger_bun", "waypoints": cp.WP_BURGER_BUN_1},
-        {"state": "MANIP", "cmd": "pick"},
-        {"state": "NAV", "path_planner": "pp", "vision": "burger_patty", "waypoints": cp.WP_BURGER_PATTY},
-        {"state": "MANIP", "cmd": "pick"},
-        {"state": "NAV", "path_planner": "pp", "vision": "burger_bun", "waypoints": cp.WP_BURGER_BUN_2},
-        {"state": "MANIP", "cmd": "pick"},
-        {"state": "NAV", "path_planner": "pp", "waypoints": [cp.WP1, cp.WP2, cp.WP3, cp.WP4]},
-        {"state": "NAV", "path_planner": "lapf", "vision": "face", "waypoints": cp.WP_CUSTOMER_ID},
-        {"state": "IDENT"},
-        {"state": "PLAN"},
-        {"state": "NAV", "path_planner": "pp", "vision": "customer", "waypoints": cp.WP_CUSTOMER_1},
-        {"state": "MANIP", "cmd": "place"},
-        {"state": "NAV", "path_planner": "pp", "vision": "stop_sign", "waypoints": cp.WP_STOP_SIGN},
-        {"state": "NAV", "path_planner": "pp", "waypoints": cp.WP5}
     ]
