@@ -344,7 +344,8 @@ class ManipTask(Task):
             if ingredient == "bun":
                 self._raise_steps -= ih.Bun.HEIGHT_STEPS
             elif ingredient == "patty":
-                self._raise_steps -= ih.Patty.HEIGHT_STEPS
+                # self._raise_steps -= ih.Patty.HEIGHT_STEPS
+                self._raise_steps -= -1000
 
         elif command == "place":
             self._sequence = bp.PLACE_SEQUENCE
