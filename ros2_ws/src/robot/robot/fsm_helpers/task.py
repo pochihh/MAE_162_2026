@@ -372,6 +372,7 @@ class ManipTask(Task):
         self._idx = 0
         self._handle = None
         self._stage_init = True
+        self._pre_approach_pose = None
 
     def on_enter(self) -> None:
         """Enable manipulator hardware once at task start."""
@@ -409,18 +410,16 @@ class ManipTask(Task):
                     angle=self._close_deg
                 )
             elif stage == bp.ManipStage.FORWARD:
+                self._pre_approach_pose = self._robot.get_pose()
                 self._handle = fh.approach_ingredient_table(self._robot)
             elif stage == bp.ManipStage.RETREAT:
                 x, y, _ = self._robot.get_pose()
-                
-                # Default backoff if nav data is missing
-                backoff_distance = 100.0 
-                
-                if "waypoints" in self._mission_data and self._mission_data["waypoints"]:
-                    # Retrieve the last waypoint of the last navigation task
-                    # This represents the pose before the 'FORWARD' approach stage
-                    last_wp = self._mission_data["waypoints"][-1]
-                    backoff_distance = math.dist([x, y], last_wp) + 35.0 # TODO: GET RID?
+
+                if self._pre_approach_pose is not None:
+                    px, py, _ = self._pre_approach_pose
+                    backoff_distance = math.dist([x, y], [px, py])
+                else:
+                    backoff_distance = 100.0
                 
                 print(f"[ManipTask] Retreating {backoff_distance:.1f} mm")
                 self._handle = self._robot.move_backward(
