@@ -273,6 +273,7 @@ class WaitTask(Task):
         self._time_detection_period = 2.0
         self._time_last_detection = 0.0
         self._traffic_light_detected = False
+        self._search_turn_done = False
 
     def update(self):
         now = time.monotonic()
@@ -302,10 +303,11 @@ class WaitTask(Task):
                     self._handle = None
                     self._time_pause_start = now
                     print("[WaitTask] Turn complete, pausing for vision...")
-            elif not self._traffic_light_detected:
+            elif not self._traffic_light_detected and not self._search_turn_done:
                 # We are currently in a pause period
                 if now - self._time_pause_start >= self._time_pause_period:
                     print("[WaitTask] Pause complete, rotating search...")
+                    self._search_turn_done = True
                     self._handle = self._robot.turn_by(
                         delta_deg=20.0,
                         blocking=False,
