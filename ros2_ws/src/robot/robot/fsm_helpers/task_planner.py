@@ -119,7 +119,7 @@ elif MODE == "FINAL":
             "path_planner": "pp",
             "vision": "burger_bun",
             "waypoints": cp.WP_BURGER_BUN_1, 
-            "goal_heading": 175.0
+            "goal_heading": 170.0
         },
         {
             "state": "MANIP",
