@@ -215,12 +215,15 @@ class StepMoveHandle(FsmHandle):
     Handle to track non-blocking stepper motion or homing progress.
     Mimics the interface of MotionHandle.
     """
+    _ACTIVE_WAIT_S = 0.25  # Minimum seconds to wait before trusting an IDLE state
+
     def __init__(self, robot: Robot, stepper_id: int, disable_on_done: bool = True, target_position: int | None = None):
         super().__init__()
         self._robot = robot
         self._id = stepper_id
         self._disable_on_done = disable_on_done
         self._saw_active = False
+        self._created_time = time.monotonic()
 
         if target_position is not None:
             state = self._robot.get_step_state()
@@ -239,18 +242,26 @@ class StepMoveHandle(FsmHandle):
         state = self._robot.get_step_state()
         if state is None:
             return False
-        
+
         # Index is 0-based
         motion_state = state.steppers[self._id - 1].motion_state
-        
+
         # 1. Detect that it has actually started moving
-        if motion_state != 0: # 0 is IDLE
+        if motion_state != 0:  # 0 is IDLE
             self._saw_active = True
-            
-        # 2. Return True only if it was moving and is now IDLE
+
+        # 2. If we never saw active, wait at least _ACTIVE_WAIT_S before
+        #    trusting IDLE — guards against polling before firmware starts moving
+        if not self._saw_active:
+            if time.monotonic() - self._created_time >= self._ACTIVE_WAIT_S:
+                self._saw_active = True  # Assume motion completed within poll gap
+            else:
+                return False
+
+        # 3. Return True only if it was moving (or assumed done) and is now IDLE
         if self._saw_active and motion_state == 0:
             if self._disable_on_done:
-                self._robot.step_disable(self._id) # Safe to disable now
+                self._robot.step_disable(self._id)  # Safe to disable now
             self._finished = True
         return self._finished
 
