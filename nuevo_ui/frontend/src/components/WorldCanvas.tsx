@@ -57,249 +57,333 @@ export function WorldCanvas() {
     setTrails((t) => ({ ...t, [key]: !t[key] }))
   }, [])
 
+  const fusedPoseRef   = useRef(fusedPose)
+  const fusedTrailRef  = useRef(fusedTrail)
+  const kinematicsRef  = useRef(kinematics)
+  const odomTrailRef   = useRef(odomTrail)
+  const gpsStatusRef   = useRef(gpsStatus)
+  const tagDetectionsRef = useRef(tagDetections)
+  const lidarPointsRef = useRef(lidarPoints)
+  const obstacleTracksRef = useRef(obstacleTracks)
+  const virtualTargetRef = useRef(virtualTarget)
+  const trailsRef      = useRef(trails)
+
   useEffect(() => {
-    const canvas = canvasRef.current
-    if (!canvas) return
-    const dpr = window.devicePixelRatio || 1
-    const W   = canvas.clientWidth
-    const H   = canvas.clientHeight
-    if (!W || !H) return
-    canvas.width  = W * dpr
-    canvas.height = H * dpr
-    const ctx = canvas.getContext('2d')!
-    ctx.scale(dpr, dpr)
+    fusedPoseRef.current = fusedPose
+    fusedTrailRef.current = fusedTrail
+    kinematicsRef.current = kinematics
+    odomTrailRef.current = odomTrail
+    gpsStatusRef.current = gpsStatus
+    tagDetectionsRef.current = tagDetections
+    lidarPointsRef.current = lidarPoints
+    obstacleTracksRef.current = obstacleTracks
+    virtualTargetRef.current = virtualTarget
+    trailsRef.current = trails
+  }, [fusedPose, fusedTrail, kinematics, odomTrail, gpsStatus, tagDetections, lidarPoints, obstacleTracks, virtualTarget, trails])
 
-    const allPts: [number, number][] = []
-    if (trails.fused)  allPts.push(...fusedTrail)
-    if (trails.odom)   allPts.push(...odomTrail)
-    if (kinematics)    allPts.push([kinematics.x, kinematics.y])
-    if (fusedPose)     allPts.push([fusedPose.x, fusedPose.y])
-    if (trails.gps) for (const t of tagDetections) allPts.push([t.x, t.y])
-    if (trails.virtual && virtualTarget) allPts.push([virtualTarget.x, virtualTarget.y])
-    if (trails.lidar) {
-      for (const frame of lidarPoints)
-        for (let i = 0; i < frame.xs.length; i++)
-          allPts.push([frame.xs[i], frame.ys[i]])
-      for (const track of obstacleTracks) {
-        allPts.push([track.x - track.radius, track.y - track.radius])
-        allPts.push([track.x + track.radius, track.y + track.radius])
+  useEffect(() => {
+    let animId: number
+
+    const tick = () => {
+      const canvas = canvasRef.current
+      if (!canvas) {
+        animId = requestAnimationFrame(tick)
+        return
       }
-    }
 
-    // Start from venue bounds; expand only if data falls outside.
-    let ext = { ...VENUE_EXT }
-    if (allPts.length > 0) {
-      const xs = allPts.map((p) => p[0])
-      const ys = allPts.map((p) => p[1])
-      ext = {
-        minX: Math.min(ext.minX, Math.min(...xs) - VENUE_PAD_MM),
-        maxX: Math.max(ext.maxX, Math.max(...xs) + VENUE_PAD_MM),
-        minY: Math.min(ext.minY, Math.min(...ys) - VENUE_PAD_MM),
-        maxY: Math.max(ext.maxY, Math.max(...ys) + VENUE_PAD_MM),
+      const dpr = window.devicePixelRatio || 1
+      const W   = canvas.clientWidth
+      const H   = canvas.clientHeight
+      if (!W || !H) {
+        animId = requestAnimationFrame(tick)
+        return
       }
-    }
-    const rangeX = Math.max(ext.maxX - ext.minX, 1)
-    const rangeY = Math.max(ext.maxY - ext.minY, 1)
-    const scale  = Math.min(W / rangeX, H / rangeY)
 
-    // Centre the content so padding is equal on all sides regardless of aspect ratio.
-    const ox = (W - rangeX * scale) / 2
-    const oy = (H - rangeY * scale) / 2
-
-    const toC = (wx: number, wy: number): [number, number] => [
-      ox + (wx - ext.minX) * scale,
-      oy + rangeY * scale - (wy - ext.minY) * scale,
-    ]
-
-    // Translucent dark background (original style)
-    ctx.fillStyle = 'rgba(0,0,0,0.55)'
-    ctx.fillRect(0, 0, W, H)
-
-    // Venue boundary rectangle
-    {
-      const [vx0, vy0] = toC(VENUE_LEFT_MM, VENUE_BOTTOM_MM)
-      const [vx1, vy1] = toC(VENUE_RIGHT_MM, VENUE_TOP_MM)
-      ctx.strokeStyle = 'rgba(255,255,255,0.18)'
-      ctx.lineWidth   = 1
-      ctx.strokeRect(vx0, vy1, vx1 - vx0, vy0 - vy1)
-    }
-
-    // Venue grid lines at 610 mm
-    ctx.strokeStyle = 'rgba(255,255,255,0.08)'
-    ctx.lineWidth   = 0.5
-    for (let col = 0; col <= VENUE_COLS; col++) {
-      const [cx] = toC(VENUE_LEFT_MM + col * GRID_MM, VENUE_BOTTOM_MM)
-      ctx.beginPath(); ctx.moveTo(cx, 0); ctx.lineTo(cx, H); ctx.stroke()
-    }
-    for (let row = 0; row <= VENUE_ROWS; row++) {
-      const [, cy] = toC(0, VENUE_BOTTOM_MM + row * GRID_MM)
-      ctx.beginPath(); ctx.moveTo(0, cy); ctx.lineTo(W, cy); ctx.stroke()
-    }
-
-    // Origin cross
-    const [originX, originY] = toC(0, 0)
-    if (originX >= 0 && originX <= W && originY >= 0 && originY <= H) {
-      ctx.strokeStyle = 'rgba(255,255,255,0.20)'
-      ctx.lineWidth = 1
-      ctx.beginPath(); ctx.moveTo(originX - 6, originY); ctx.lineTo(originX + 6, originY); ctx.stroke()
-      ctx.beginPath(); ctx.moveTo(originX, originY - 6); ctx.lineTo(originX, originY + 6); ctx.stroke()
-    }
-
-    // Scale label
-    ctx.fillStyle = 'rgba(255,255,255,0.40)'
-    ctx.font = '9px monospace'
-    ctx.textAlign = 'right'
-    ctx.textBaseline = 'bottom'
-    ctx.fillText(`grid: ${GRID_MM} mm`, W - 4, H - 3)
-
-    // Odometry trail (blue)
-    if (trails.odom && odomTrail.length > 1) {
-      ctx.beginPath()
-      ctx.strokeStyle = 'rgba(96,165,250,0.55)'
-      ctx.lineWidth = 1.5
-      ctx.lineJoin = 'round'
-      odomTrail.forEach(([wx, wy], i) => {
-        const [cx, cy] = toC(wx, wy)
-        i === 0 ? ctx.moveTo(cx, cy) : ctx.lineTo(cx, cy)
-      })
-      ctx.stroke()
-    }
-    if (trails.odom && odomTrail.length === 1) {
-      const [cx, cy] = toC(odomTrail[0][0], odomTrail[0][1])
-      ctx.beginPath()
-      ctx.arc(cx, cy, 2.5, 0, Math.PI * 2)
-      ctx.fillStyle = 'rgba(96,165,250,0.80)'
-      ctx.fill()
-    }
-
-    // Fused trail (green)
-    if (trails.fused && fusedTrail.length > 1) {
-      ctx.beginPath()
-      ctx.strokeStyle = 'rgba(74,222,128,0.70)'
-      ctx.lineWidth = 1.5
-      ctx.lineJoin = 'round'
-      fusedTrail.forEach(([wx, wy], i) => {
-        const [cx, cy] = toC(wx, wy)
-        i === 0 ? ctx.moveTo(cx, cy) : ctx.lineTo(cx, cy)
-      })
-      ctx.stroke()
-    }
-
-    // GPS tags — yellow cross + ID label for every currently detected tag
-    if (trails.gps && tagDetections.length > 0) {
-      const arm = 6
-      ctx.strokeStyle = 'rgba(250,204,21,0.90)'
-      ctx.lineWidth = 2
-      ctx.fillStyle = 'rgba(250,204,21,0.90)'
-      ctx.font = '10px monospace'
-      ctx.textAlign = 'left'
-      ctx.textBaseline = 'bottom'
-      for (const tag of tagDetections) {
-        const [cx, cy] = toC(tag.x, tag.y)
-        ctx.beginPath(); ctx.moveTo(cx - arm, cy); ctx.lineTo(cx + arm, cy); ctx.stroke()
-        ctx.beginPath(); ctx.moveTo(cx, cy - arm); ctx.lineTo(cx, cy + arm); ctx.stroke()
-        ctx.fillText(`#${tag.tag_id}`, cx + arm + 2, cy)
+      // Only resize the backing store if the layout size actually changed
+      if (canvas.width !== W * dpr || canvas.height !== H * dpr) {
+        canvas.width  = W * dpr
+        canvas.height = H * dpr
       }
-    }
 
-    // Lidar cloud — all frames in the rolling window, oldest most transparent
-    if (trails.lidar && lidarPoints.length > 0) {
-      for (let f = 0; f < lidarPoints.length; f++) {
-        const alpha = 0.25 + 0.45 * (f / (LIDAR_WINDOW_FRAMES - 1 || 1))  // 0.25 → 0.70
-        ctx.fillStyle = `rgba(248,113,113,${alpha.toFixed(2)})`
-        const frame = lidarPoints[f]
-        for (let i = 0; i < frame.xs.length; i++) {
-          const [cx, cy] = toC(frame.xs[i], frame.ys[i])
-          ctx.beginPath(); ctx.arc(cx, cy, 1.5, 0, Math.PI * 2); ctx.fill()
+      const ctx = canvas.getContext('2d')
+      if (!ctx) {
+        animId = requestAnimationFrame(tick)
+        return
+      }
+
+      // Reset transform and apply DPR scaling
+      ctx.setTransform(1, 0, 0, 1, 0, 0)
+      ctx.scale(dpr, dpr)
+
+      const trailsVal = trailsRef.current
+      const odomTrailVal = odomTrailRef.current
+      const fusedTrailVal = fusedTrailRef.current
+      const kinematicsVal = kinematicsRef.current
+      const fusedPoseVal = fusedPoseRef.current
+      const tagDetectionsVal = tagDetectionsRef.current
+      const lidarPointsVal = lidarPointsRef.current
+      const obstacleTracksVal = obstacleTracksRef.current
+      const virtualTargetVal = virtualTargetRef.current
+
+      // Calculate dynamic boundaries sequentially without array allocation or stack spread
+      let minX = VENUE_EXT.minX
+      let maxX = VENUE_EXT.maxX
+      let minY = VENUE_EXT.minY
+      let maxY = VENUE_EXT.maxY
+
+      const updateBounds = (x: number, y: number) => {
+        if (x - VENUE_PAD_MM < minX) minX = x - VENUE_PAD_MM
+        if (x + VENUE_PAD_MM > maxX) maxX = x + VENUE_PAD_MM
+        if (y - VENUE_PAD_MM < minY) minY = y - VENUE_PAD_MM
+        if (y + VENUE_PAD_MM > maxY) maxY = y + VENUE_PAD_MM
+      }
+
+      if (trailsVal.fused) {
+        for (let i = 0; i < fusedTrailVal.length; i++) {
+          updateBounds(fusedTrailVal[i][0], fusedTrailVal[i][1])
         }
       }
-    }
-
-    if (trails.lidar && obstacleTracks.length > 0) {
-      ctx.strokeStyle = 'rgba(248,113,113,0.95)'
-      ctx.fillStyle = 'rgba(248,113,113,0.95)'
-      ctx.lineWidth = 1.5
-      ctx.font = '10px monospace'
-      ctx.textAlign = 'left'
-      ctx.textBaseline = 'bottom'
-      for (const track of obstacleTracks) {
-        const [cx, cy] = toC(track.x, track.y)
-        const radiusPx = Math.max(2, track.radius * scale)
-        ctx.beginPath()
-        ctx.arc(cx, cy, radiusPx, 0, Math.PI * 2)
-        ctx.stroke()
-        ctx.fillText(`#${track.id}`, cx + radiusPx + 3, cy - 2)
+      if (trailsVal.odom) {
+        for (let i = 0; i < odomTrailVal.length; i++) {
+          updateBounds(odomTrailVal[i][0], odomTrailVal[i][1])
+        }
       }
-    }
+      if (kinematicsVal) updateBounds(kinematicsVal.x, kinematicsVal.y)
+      if (fusedPoseVal) updateBounds(fusedPoseVal.x, fusedPoseVal.y)
+      if (trailsVal.gps) {
+        for (let i = 0; i < tagDetectionsVal.length; i++) {
+          updateBounds(tagDetectionsVal[i].x, tagDetectionsVal[i].y)
+        }
+      }
+      if (trailsVal.virtual && virtualTargetVal) {
+        updateBounds(virtualTargetVal.x, virtualTargetVal.y)
+      }
+      if (trailsVal.lidar) {
+        for (let f = 0; f < lidarPointsVal.length; f++) {
+          const frame = lidarPointsVal[f]
+          for (let i = 0; i < frame.xs.length; i++) {
+            updateBounds(frame.xs[i], frame.ys[i])
+          }
+        }
+        for (let i = 0; i < obstacleTracksVal.length; i++) {
+          const track = obstacleTracksVal[i]
+          updateBounds(track.x - track.radius, track.y - track.radius)
+          updateBounds(track.x + track.radius, track.y + track.radius)
+        }
+      }
 
-    if (trails.virtual && virtualTarget) {
-      const [cx, cy] = toC(virtualTarget.x, virtualTarget.y)
-      ctx.fillStyle = 'rgba(34,211,238,0.95)'
-      ctx.strokeStyle = 'rgba(34,211,238,0.95)'
-      ctx.lineWidth = 1.5
-      ctx.beginPath()
-      ctx.arc(cx, cy, 4.0, 0, Math.PI * 2)
-      ctx.fill()
-      ctx.font = '10px monospace'
-      ctx.textAlign = 'left'
+      const rangeX = Math.max(maxX - minX, 1)
+      const rangeY = Math.max(maxY - minY, 1)
+      const scale  = Math.min(W / rangeX, H / rangeY)
+
+      // Centre the content so padding is equal on all sides regardless of aspect ratio.
+      const ox = (W - rangeX * scale) / 2
+      const oy = (H - rangeY * scale) / 2
+
+      const toC = (wx: number, wy: number): [number, number] => [
+        ox + (wx - minX) * scale,
+        oy + rangeY * scale - (wy - minY) * scale,
+      ]
+
+      // Translucent dark background
+      ctx.fillStyle = 'rgba(0,0,0,0.55)'
+      ctx.fillRect(0, 0, W, H)
+
+      // Venue boundary rectangle
+      {
+        const [vx0, vy0] = toC(VENUE_LEFT_MM, VENUE_BOTTOM_MM)
+        const [vx1, vy1] = toC(VENUE_RIGHT_MM, VENUE_TOP_MM)
+        ctx.strokeStyle = 'rgba(255,255,255,0.18)'
+        ctx.lineWidth   = 1
+        ctx.strokeRect(vx0, vy1, vx1 - vx0, vy0 - vy1)
+      }
+
+      // Venue grid lines at 610 mm
+      ctx.strokeStyle = 'rgba(255,255,255,0.08)'
+      ctx.lineWidth   = 0.5
+      for (let col = 0; col <= VENUE_COLS; col++) {
+        const [cx] = toC(VENUE_LEFT_MM + col * GRID_MM, VENUE_BOTTOM_MM)
+        ctx.beginPath(); ctx.moveTo(cx, 0); ctx.lineTo(cx, H); ctx.stroke()
+      }
+      for (let row = 0; row <= VENUE_ROWS; row++) {
+        const [, cy] = toC(0, VENUE_BOTTOM_MM + row * GRID_MM)
+        ctx.beginPath(); ctx.moveTo(0, cy); ctx.lineTo(W, cy); ctx.stroke()
+      }
+
+      // Origin cross
+      const [originX, originY] = toC(0, 0)
+      if (originX >= 0 && originX <= W && originY >= 0 && originY <= H) {
+        ctx.strokeStyle = 'rgba(255,255,255,0.20)'
+        ctx.lineWidth = 1
+        ctx.beginPath(); ctx.moveTo(originX - 6, originY); ctx.lineTo(originX + 6, originY); ctx.stroke()
+        ctx.beginPath(); ctx.moveTo(originX, originY - 6); ctx.lineTo(originX, originY + 6); ctx.stroke()
+      }
+
+      // Scale label
+      ctx.fillStyle = 'rgba(255,255,255,0.40)'
+      ctx.font = '9px monospace'
+      ctx.textAlign = 'right'
       ctx.textBaseline = 'bottom'
-      ctx.fillText('LVT', cx + 6, cy - 2)
+      ctx.fillText(`grid: ${GRID_MM} mm`, W - 4, H - 3)
+
+      // Odometry trail (blue)
+      if (trailsVal.odom && odomTrailVal.length > 1) {
+        ctx.beginPath()
+        ctx.strokeStyle = 'rgba(96,165,250,0.55)'
+        ctx.lineWidth = 1.5
+        ctx.lineJoin = 'round'
+        odomTrailVal.forEach(([wx, wy], i) => {
+          const [cx, cy] = toC(wx, wy)
+          i === 0 ? ctx.moveTo(cx, cy) : ctx.lineTo(cx, cy)
+        })
+        ctx.stroke()
+      }
+      if (trailsVal.odom && odomTrailVal.length === 1) {
+        const [cx, cy] = toC(odomTrailVal[0][0], odomTrailVal[0][1])
+        ctx.beginPath()
+        ctx.arc(cx, cy, 2.5, 0, Math.PI * 2)
+        ctx.fillStyle = 'rgba(96,165,250,0.80)'
+        ctx.fill()
+      }
+
+      // Fused trail (green)
+      if (trailsVal.fused && fusedTrailVal.length > 1) {
+        ctx.beginPath()
+        ctx.strokeStyle = 'rgba(74,222,128,0.70)'
+        ctx.lineWidth = 1.5
+        ctx.lineJoin = 'round'
+        fusedTrailVal.forEach(([wx, wy], i) => {
+          const [cx, cy] = toC(wx, wy)
+          i === 0 ? ctx.moveTo(cx, cy) : ctx.lineTo(cx, cy)
+        })
+        ctx.stroke()
+      }
+
+      // GPS tags — yellow cross + ID label
+      if (trailsVal.gps && tagDetectionsVal.length > 0) {
+        const arm = 6
+        ctx.strokeStyle = 'rgba(250,204,21,0.90)'
+        ctx.lineWidth = 2
+        ctx.fillStyle = 'rgba(250,204,21,0.90)'
+        ctx.font = '10px monospace'
+        ctx.textAlign = 'left'
+        ctx.textBaseline = 'bottom'
+        for (let i = 0; i < tagDetectionsVal.length; i++) {
+          const tag = tagDetectionsVal[i]
+          const [cx, cy] = toC(tag.x, tag.y)
+          ctx.beginPath(); ctx.moveTo(cx - arm, cy); ctx.lineTo(cx + arm, cy); ctx.stroke()
+          ctx.beginPath(); ctx.moveTo(cx, cy - arm); ctx.lineTo(cx, cy + arm); ctx.stroke()
+          ctx.fillText(`#${tag.tag_id}`, cx + arm + 2, cy)
+        }
+      }
+
+      // Lidar cloud — fast pixel blitting instead of complex circles
+      if (trailsVal.lidar && lidarPointsVal.length > 0) {
+        for (let f = 0; f < lidarPointsVal.length; f++) {
+          const alpha = 0.25 + 0.45 * (f / (LIDAR_WINDOW_FRAMES - 1 || 1))
+          ctx.fillStyle = `rgba(248,113,113,${alpha.toFixed(2)})`
+          const frame = lidarPointsVal[f]
+          for (let i = 0; i < frame.xs.length; i++) {
+            const [cx, cy] = toC(frame.xs[i], frame.ys[i])
+            ctx.fillRect(cx - 1, cy - 1, 2, 2)
+          }
+        }
+      }
+
+      // Obstacle tracks
+      if (trailsVal.lidar && obstacleTracksVal.length > 0) {
+        ctx.strokeStyle = 'rgba(248,113,113,0.95)'
+        ctx.fillStyle = 'rgba(248,113,113,0.95)'
+        ctx.lineWidth = 1.5
+        ctx.font = '10px monospace'
+        ctx.textAlign = 'left'
+        ctx.textBaseline = 'bottom'
+        for (let i = 0; i < obstacleTracksVal.length; i++) {
+          const track = obstacleTracksVal[i]
+          const [cx, cy] = toC(track.x, track.y)
+          const radiusPx = Math.max(2, track.radius * scale)
+          ctx.beginPath()
+          ctx.arc(cx, cy, radiusPx, 0, Math.PI * 2)
+          ctx.stroke()
+          ctx.fillText(`#${track.id}`, cx + radiusPx + 3, cy - 2)
+        }
+      }
+
+      // Virtual target
+      if (trailsVal.virtual && virtualTargetVal) {
+        const [cx, cy] = toC(virtualTargetVal.x, virtualTargetVal.y)
+        ctx.fillStyle = 'rgba(34,211,238,0.95)'
+        ctx.strokeStyle = 'rgba(34,211,238,0.95)'
+        ctx.lineWidth = 1.5
+        ctx.beginPath()
+        ctx.arc(cx, cy, 4.0, 0, Math.PI * 2)
+        ctx.fill()
+        ctx.font = '10px monospace'
+        ctx.textAlign = 'left'
+        ctx.textBaseline = 'bottom'
+        ctx.fillText('LVT', cx + 6, cy - 2)
+      }
+
+      const drawRobot = (
+        x: number,
+        y: number,
+        theta: number,
+        stroke: string,
+        fill: string,
+      ) => {
+        const [rx, ry] = toC(x, y)
+        const headingCanvas = -theta  // world CCW → canvas CW
+        const arrowLen = Math.max(12, Math.min(28, Math.min(rangeX, rangeY) * scale * 0.06))
+        const nx = Math.cos(headingCanvas), ny = Math.sin(headingCanvas)
+        const tipX = rx + nx * arrowLen, tipY = ry + ny * arrowLen
+        const hw = 4
+
+        ctx.beginPath()
+        ctx.arc(rx, ry, 7, 0, Math.PI * 2)
+        ctx.fillStyle   = fill
+        ctx.strokeStyle = stroke
+        ctx.lineWidth   = 1.5
+        ctx.fill()
+        ctx.stroke()
+
+        ctx.strokeStyle = stroke
+        ctx.lineWidth   = 2
+        ctx.beginPath(); ctx.moveTo(rx, ry); ctx.lineTo(tipX, tipY); ctx.stroke()
+
+        ctx.fillStyle = stroke
+        ctx.beginPath()
+        ctx.moveTo(tipX, tipY)
+        ctx.lineTo(tipX - nx * 8 + ny * hw, tipY - ny * 8 - nx * hw)
+        ctx.lineTo(tipX - nx * 8 - ny * hw, tipY - ny * 8 + nx * hw)
+        ctx.closePath()
+        ctx.fill()
+      }
+
+      // Robot at fused pose when available; otherwise fall back to raw odometry.
+      if (fusedPoseVal) {
+        drawRobot(
+          fusedPoseVal.x,
+          fusedPoseVal.y,
+          fusedPoseVal.theta,
+          '#4ade80',
+          'rgba(74,222,128,0.25)',
+        )
+      } else if (kinematicsVal) {
+        drawRobot(
+          kinematicsVal.x,
+          kinematicsVal.y,
+          kinematicsVal.theta,
+          '#60a5fa',
+          'rgba(96,165,250,0.25)',
+        )
+      }
+
+      animId = requestAnimationFrame(tick)
     }
 
-    const drawRobot = (
-      x: number,
-      y: number,
-      theta: number,
-      stroke: string,
-      fill: string,
-    ) => {
-      const [rx, ry] = toC(x, y)
-      const headingCanvas = -theta  // world CCW → canvas CW
-      const arrowLen = Math.max(12, Math.min(28, Math.min(rangeX, rangeY) * scale * 0.06))
-      const nx = Math.cos(headingCanvas), ny = Math.sin(headingCanvas)
-      const tipX = rx + nx * arrowLen, tipY = ry + ny * arrowLen
-      const hw = 4
-
-      ctx.beginPath()
-      ctx.arc(rx, ry, 7, 0, Math.PI * 2)
-      ctx.fillStyle   = fill
-      ctx.strokeStyle = stroke
-      ctx.lineWidth   = 1.5
-      ctx.fill()
-      ctx.stroke()
-
-      ctx.strokeStyle = stroke
-      ctx.lineWidth   = 2
-      ctx.beginPath(); ctx.moveTo(rx, ry); ctx.lineTo(tipX, tipY); ctx.stroke()
-
-      ctx.fillStyle = stroke
-      ctx.beginPath()
-      ctx.moveTo(tipX, tipY)
-      ctx.lineTo(tipX - nx * 8 + ny * hw, tipY - ny * 8 - nx * hw)
-      ctx.lineTo(tipX - nx * 8 - ny * hw, tipY - ny * 8 + nx * hw)
-      ctx.closePath()
-      ctx.fill()
-    }
-
-    // Robot at fused pose when available; otherwise fall back to raw odometry.
-    if (fusedPose) {
-      drawRobot(
-        fusedPose.x,
-        fusedPose.y,
-        fusedPose.theta,
-        '#4ade80',
-        'rgba(74,222,128,0.25)',
-      )
-    } else if (kinematics) {
-      drawRobot(
-        kinematics.x,
-        kinematics.y,
-        kinematics.theta,
-        '#60a5fa',
-        'rgba(96,165,250,0.25)',
-      )
-    }
-  }, [fusedPose, fusedTrail, kinematics, odomTrail, gpsStatus, tagDetections, lidarPoints, obstacleTracks, virtualTarget, trails])
+    animId = requestAnimationFrame(tick)
+    return () => cancelAnimationFrame(animId)
+  }, [])
 
   return (
     <div className="relative rounded-2xl p-4 backdrop-blur-2xl bg-white/10 border border-white/20 shadow-xl">
