@@ -54,7 +54,7 @@ def generate_launch_description() -> LaunchDescription:
         ),
         DeclareLaunchArgument(
             "inverted",
-            default_value="false",
+            default_value="true",
             description="Invert scan direction if the lidar is mounted upside down.",
         ),
         DeclareLaunchArgument(

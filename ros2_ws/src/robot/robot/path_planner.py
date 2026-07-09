@@ -638,7 +638,8 @@ class PurePursuitPlannerWithAvoidance(PathPlanner):
         x, y, theta = pose
         if len(obstacles_r) > 0:
             # lidar orientation due to installation is 180 deg rotated from robot forward, so rotate obstacles accordingly.
-            obstacles_r = (np.array([[np.cos(np.pi), -np.sin(np.pi)], [np.sin(np.pi), np.cos(np.pi)]]) @ obstacles_r.T).T 
+            obstacles_r = (np.array([[np.cos(np.pi), -np.sin(np.pi)], [np.sin(np.pi), np.cos(np.pi)]]) @ obstacles_r.T).T
+            obstacles_r[:,1] *= -1
             
             # since some robot parts (e.g., the arm) may cause obstacles to be detected, we can filter out those obstacles behind the lidar.
             obstacles_r = obstacles_r[np.abs(np.arctan2(obstacles_r[:,1],obstacles_r[:,0])) <= self.view_angle,:] # only consider obstacles in front of the robot within 180 deg FOV, which can help prevent the robot from being too conservative by reacting to obstacles behind it that are not in its path.
@@ -684,23 +685,37 @@ class PurePursuitPlannerWithAvoidance(PathPlanner):
                 # Generate new waypoints based on the desired waypoints on the center lane.
                 if change_lane:
                     self.remaining_path = []
+                    
+                    # ALGORITHM UPDATE: Create a smooth diagonal merge
+                    # By making the forward distance slightly larger than the lateral offset, 
+                    # we keep the transition angle under 45°, allowing forward speed to continue.
+                    merge_forward_dist = self.offset * 1.2 
+                    merge_y = y + merge_forward_dist
+                    if closest_pt[0] < self.x_L:
+                        self.current_lane = 'Right'
+                        target_x = x + self.offset
+                    else:
+                        self.current_lane = 'Left'
+                        target_x = x - self.offset
+                    # Inject a midpoint to give Pure Pursuit a diagonal breadcrumb trail to follow
+                    mid_x = x + ((target_x - x) / 2.0)
+                    mid_y = y + (merge_forward_dist / 2.0)
+                    self.remaining_path.append((mid_x, mid_y))
+                    self.remaining_path.append((target_x, merge_y)) 
+                    # Append the rest of the shifted path
                     for i in range(len(self.raw_path)):
                         x_, y_ = self.raw_path[i]
-                        if closest_pt[0] < self.x_L:
-                            self.remaining_path.append((x_+self.offset, y_))
-                            self.current_lane = 'Right'
-                        else:
-                            self.remaining_path.append((x_-self.offset, y_))
-                            self.current_lane = 'Left'
+                        if y_ > merge_y: 
+                            if self.current_lane == 'Right':
+                                self.remaining_path.append((x_ + self.offset, y_))
+                            else:
+                                self.remaining_path.append((x_ - self.offset, y_))
                     print('Change Lane!!! Current lane is:', self.current_lane)
-                    if np.hypot(x-closest_pt[0], y-closest_pt[1]) < (self.safe_dist+self.obstacles_range)/2:
-                        print('Too Closed!!!')
-                        if self.current_lane == 'Right':
-                            self.remaining_path.insert(0, (x+self.offset, y+self.offset/2))
-                            self.raw_path.insert(0, (x+self.offset, y+self.offset))
-                        elif self.current_lane == 'Left':
-                            self.remaining_path.insert(0, (x-self.offset, y+self.offset/2))
-                            self.raw_path.insert(0, (x-self.offset, y+self.offset))
+                    # Reduce lookahead distance to track the diagonal precisely.
+                    self.Ld = self.raw_LD * self.alpha_Ld
+                    # Keep avoidance active for a few cycles.
+                    self.avoidance_counter = self.avoidance_delay
+                    self.avoidance_active = True
 
         if self.avoidance_counter > 0:
             self.avoidance_counter -= 1
@@ -765,3 +780,258 @@ class PurePursuitPlannerWithAvoidance(PathPlanner):
 
 def _wrap_angle(a: float) -> float:
     return (a + math.pi) % (2.0 * math.pi) - math.pi
+
+
+
+# =============================================================================
+# Dynamic Window Approach (DWA)
+# =============================================================================
+
+class DWAPlanner(PathPlanner):
+    """
+    Dynamic Window Approach path planner for local obstacle avoidance.
+    
+    Generates a fan of feasible velocity trajectories based on the robot's
+    kinematic limits, scores them against a cost function (heading, clearance, 
+    velocity), and selects the optimal (v, w) command.
+    """
+    def __init__(
+        self,
+        lookahead_dist: float,
+        max_linear_speed: float,
+        max_angular_speed: float,
+        max_linear_acc: float,
+        max_angular_acc: float,
+        goal_tolerance: float,
+        gains_of_costs: list[float],
+        dt: float,
+        predict_time: float,
+        predict_velocity_samples_resolution: list[int],
+        robot_front_mm: float,       # <-- Replaced robot_radius
+        robot_rear_mm: float,        # <-- 
+        robot_half_width_mm: float,  # <-- 
+        obstacles_range: float,
+        ttc_weight: float = 0.0,
+    ):
+        self.lookahead_dist = lookahead_dist
+        self.max_v = max_linear_speed
+        self.max_w = max_angular_speed
+        self.max_acc_v = max_linear_acc
+        self.max_acc_w = max_angular_acc
+        self.goal_tolerance = goal_tolerance
+        self.gains = gains_of_costs
+        self.dt = dt
+        self.predict_time = predict_time
+        self.v_res = max(1, predict_velocity_samples_resolution[0])
+        self.w_res = max(1, predict_velocity_samples_resolution[1])
+        
+        # Rectangular footprint bounds relative to the rear-axle origin
+        self.robot_front_mm = robot_front_mm
+        self.robot_rear_mm = robot_rear_mm
+        self.robot_half_width_mm = robot_half_width_mm
+        
+        self.obstacles_range = obstacles_range
+        self.ttc_weight = ttc_weight
+
+        # Lidar Hardware specifications - match hardware_map.py
+        self.lidar_mount_x = 336.55
+        self.lidar_mount_y = 0.0
+        self.lidar_range_min = 75.0
+        self.lidar_range_max = 1500.0
+        self.lidar_fov_min_rad = math.radians(-90.0)
+        self.lidar_fov_max_rad = math.radians(90.0)
+
+    def TargetReached(self, path: list[tuple[float, float]], current_x: float, current_y: float) -> bool:
+        if not path:
+            return True
+        final_x, final_y = path[-1]
+        return math.hypot(final_x - current_x, final_y - current_y) <= self.goal_tolerance
+
+    def _get_local_goal(self, path: list[tuple[float, float]], pose: tuple[float, float, float]) -> tuple[float, float]:
+        rx, ry, _ = pose
+        
+        # Auto-scale the aiming distance:
+        # Ensures DWA always aims at a point further than its longest trajectory,
+        # preventing the "overshoot panic" even if lookahead_dist is very small.
+        predict_dist = self.max_v * self.predict_time
+        min_aim_dist = max(self.lookahead_dist, predict_dist)
+        
+        best_goal = path[-1]
+        for pt in path:
+            if math.hypot(pt[0] - rx, pt[1] - ry) >= min_aim_dist:
+                best_goal = pt
+                break
+        return best_goal
+
+    def _filter_and_transform_obstacles(self, raw_obstacles_r: np.ndarray, pose: tuple[float, float, float]) -> np.ndarray:
+        """Filters lidar points by FOV/Range and transforms to Global frame."""
+        if raw_obstacles_r.size == 0:
+            return np.array([])
+
+        x_lidar = raw_obstacles_r[:, 0]
+        y_lidar = raw_obstacles_r[:, 1]
+
+        # 1. Filter based on FOV and Range
+        ranges = np.hypot(x_lidar, y_lidar)
+        angles = np.arctan2(y_lidar, x_lidar)
+        
+        valid_mask = (
+            (ranges >= self.lidar_range_min) &
+            (ranges <= self.lidar_range_max) &
+            (angles >= self.lidar_fov_min_rad) &
+            (angles <= self.lidar_fov_max_rad)
+        )
+
+        # # --- RAMP PERCEPTION MASK: not used anymore --- 
+        # if getattr(self, 'ramp_mask_active', False):
+        #     # Carve out a blind spot (+/- x degrees) dead ahead to ignore the ramp incline
+        #     blind_spot_rad = math.radians(60.0)
+        #     valid_mask &= (np.abs(angles) > blind_spot_rad)
+        # # -----------------------------------
+        
+        x_filtered = x_lidar[valid_mask]
+        y_filtered = y_lidar[valid_mask]
+
+        if len(x_filtered) == 0:
+            return np.array([])
+
+        # 2. Shift to Robot Center (apply mount offset)
+        x_robot = x_filtered + self.lidar_mount_x
+        y_robot = y_filtered + self.lidar_mount_y
+
+        # 3. Transform to Global Frame
+        gx, gy, gtheta = pose
+        cos_theta = math.cos(gtheta)
+        sin_theta = math.sin(gtheta)
+
+        global_x = gx + (x_robot * cos_theta - y_robot * sin_theta)
+        global_y = gy + (x_robot * sin_theta + y_robot * cos_theta)
+
+        return np.column_stack((global_x, global_y))
+
+    def _calc_dynamic_window(self, vel: tuple[float, float, float]) -> tuple[float, float, float, float]:
+        v_current = vel[0]  
+        w_current = vel[2]  
+
+        # Expand the acceleration window. If we strictly use the FSM dt (0.02s), 
+        # the planner restricts the rover to tiny adjustments and forbids hard swerves.
+        window_time = 0.5 
+
+        # Specification limits [v_min, v_max, w_min, w_max]
+        Vs = [0.0, self.max_v, -self.max_w, self.max_w]
+
+        # Dynamic limits based on acceleration
+        Vd = [
+            v_current - self.max_acc_v * window_time,
+            v_current + self.max_acc_v * window_time,
+            w_current - self.max_acc_w * window_time,
+            w_current + self.max_acc_w * window_time
+        ]
+
+        return (
+            max(Vs[0], Vd[0]),
+            min(Vs[1], Vd[1]),
+            max(Vs[2], Vd[2]),
+            min(Vs[3], Vd[3])
+        )
+
+    def _predict_trajectory(self, pose: tuple[float, float, float], v: float, w: float) -> np.ndarray:
+        x, y, theta = pose
+        time = 0.0
+        trajectory = []
+        
+        while time <= self.predict_time:
+            x += v * math.cos(theta) * self.dt
+            y += v * math.sin(theta) * self.dt
+            theta += w * self.dt
+            trajectory.append([x, y, theta])
+            time += self.dt
+            
+        return np.array(trajectory)
+
+    def compute_velocity(self, path: list[tuple[float, float]], pose: tuple[float, float, float], vel: tuple[float, float, float], raw_obstacles: np.ndarray, period: float) -> tuple[float, float]:
+        self.dt = period 
+        goal = self._get_local_goal(path, pose)
+        global_obstacles = self._filter_and_transform_obstacles(raw_obstacles, pose)
+        dw = self._calc_dynamic_window(vel)
+
+        best_v = 0.0
+        best_w = 0.0
+        min_cost = float('inf')
+
+        v_samples = np.linspace(dw[0], dw[1], self.v_res)
+        w_samples = np.linspace(dw[2], dw[3], self.w_res)
+
+        for v in v_samples:
+            for w in w_samples:
+                
+                # ---------------------------------------------------------
+                # ANTI-DONUT RULE
+                # If a trajectory turns more than 180 degrees in the prediction 
+                # window, discard it. This prevents the robot from driving in 
+                # circles to "cheat" the heading cost.
+                # ---------------------------------------------------------
+                if abs(w * self.predict_time) > math.pi:
+                    continue
+                
+                trajectory = self._predict_trajectory(pose, v, w)
+                final_pose = trajectory[-1]
+
+
+                # 1. Heading Cost (Normalized 0.0 to 1.0)
+                # 0.0 = pointing exactly at goal, 1.0 = pointing completely opposite
+                angle_to_goal = math.atan2(goal[1] - final_pose[1], goal[0] - final_pose[0])
+                heading_diff = abs(_wrap_angle(angle_to_goal - final_pose[2]))
+                heading_cost = self.gains[0] * (heading_diff / math.pi)
+                
+                # 2. Clearance Cost (Normalized 0.0 to 1.0)
+                clearance_cost = 0.0
+                if global_obstacles.size > 0:
+                    min_dist = float('inf')
+                    
+                    for i in range(len(trajectory)):
+                        tx, ty, ttheta = trajectory[i]
+                        cos_th = math.cos(ttheta)
+                        sin_th = math.sin(ttheta)
+
+                        dx = global_obstacles[:, 0] - tx
+                        dy = global_obstacles[:, 1] - ty
+                        local_x = dx * cos_th + dy * sin_th
+                        local_y = -dx * sin_th + dy * cos_th
+
+                        clamped_x = np.clip(local_x, -self.robot_rear_mm, self.robot_front_mm)
+                        clamped_y = np.clip(local_y, -self.robot_half_width_mm, self.robot_half_width_mm)
+
+                        distances = np.hypot(local_x - clamped_x, local_y - clamped_y)
+                        step_min_dist = np.min(distances)
+
+                        if step_min_dist < min_dist:
+                            min_dist = step_min_dist
+
+                    if min_dist <= 0.0:
+                        continue  # Skip this trajectory; it causes a collision
+                    elif min_dist < self.obstacles_range:
+                        # 1.0 = practically touching, 0.0 = obstacle is at the outer edge of obstacles_range
+                        clearance_cost = self.gains[1] * ((self.obstacles_range - min_dist) / self.obstacles_range)
+                
+                # 3. Velocity Cost (Normalized 0.0 to 1.0)
+                # 0.0 = driving at max speed, 1.0 = fully stopped
+                vel_cost = self.gains[2] * ((self.max_v - v) / self.max_v)
+
+                total_cost = heading_cost + clearance_cost + vel_cost
+
+                if total_cost < min_cost:
+                    min_cost = total_cost
+                    best_v = v
+                    best_w = w
+
+        # Emergency fallback: Stop and gently spin to find a clear path
+        # if min_cost == float('inf'):
+        #     return 0.0, self.max_w * 0.5
+        
+        # Emergency fallback: Employ collision handling if trapped or if best path is to stay still
+        if min_cost == float('inf') or (best_v == 0.0 and best_w == 0.0):
+            print("Collision Detected - Repositioning...")
+            return None, None
+
+        return best_v, best_w

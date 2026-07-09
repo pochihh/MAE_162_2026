@@ -23,23 +23,24 @@ class Motor(IntEnum):
 # Robot defaults can import one source of truth for the drive base, lidar
 # self-filtering, and GPS tag mounting geometry.
 POSITION_UNIT = Unit.MM
-WHEEL_DIAMETER = 74.0
-WHEEL_BASE = 333.0
+WHEEL_DIAMETER = 84.0
+WHEEL_BASE = 375.0      # VERY IMPORTANT FOR PP ODOMETRY - expanded a little wider than actual.
 INITIAL_THETA_DEG = 90.0
 
 LEFT_WHEEL_MOTOR = Motor.DC_M1
-LEFT_WHEEL_DIR_INVERTED = False
+LEFT_WHEEL_DIR_INVERTED = True
 RIGHT_WHEEL_MOTOR = Motor.DC_M2
-RIGHT_WHEEL_DIR_INVERTED = True
+RIGHT_WHEEL_DIR_INVERTED = False
 
-LIDAR_MOUNT_X_MM = 0.0
+# these params are hardcoded into the path_planner.py algorithm for DWA
+LIDAR_MOUNT_X_MM = 336.55
 LIDAR_MOUNT_Y_MM = 0.0
-LIDAR_MOUNT_THETA_DEG = 0.0
-LIDAR_RANGE_MIN_MM = 150.0
-LIDAR_RANGE_MAX_MM = 6000.0
-LIDAR_FOV_DEG = (-180.0, 180.0)
+LIDAR_MOUNT_THETA_DEG = 0.0 # not inverting here bc inverted in rplidar_c1.launch.py
+LIDAR_RANGE_MIN_MM = 75.0
+LIDAR_RANGE_MAX_MM = 1500.0
+LIDAR_FOV_DEG = (-90.0, 90.0)
 
-TAG_BODY_OFFSET_X_MM = 0.0
+TAG_BODY_OFFSET_X_MM = 350.0
 TAG_BODY_OFFSET_Y_MM = 0.0
 
 class Stepper(IntEnum):

@@ -19,13 +19,21 @@ def generate_launch_description():
                 "frame_id": "laser_frame",
                 "topic_name": "scan",
                 "scan_mode": "Standard",
+                "inverted": "true",         # lidar is inverted
                 "angle_compensate": "true",
             }.items(),
         ),
+        # IncludeLaunchDescription(
+        #     PythonLaunchDescriptionSource(
+        #         PathJoinSubstitution(
+        #             [FindPackageShare("sensors"), "launch", "sensors.launch.py"]
+        #         )
+        #     ),
+        # ),
         IncludeLaunchDescription(
             PythonLaunchDescriptionSource(
                 PathJoinSubstitution(
-                    [FindPackageShare("sensors"), "launch", "sensors.launch.py"]
+                    [FindPackageShare("vision"), "launch", "vision_production.launch.py"]
                 )
             ),
         ),
